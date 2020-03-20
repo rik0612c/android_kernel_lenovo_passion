@@ -30,10 +30,10 @@
 
 #include "power.h"
 
-struct pm_sleep_state pm_states[PM_SUSPEND_MAX] = {
-	[PM_SUSPEND_FREEZE] = { .label = "freeze", .state = PM_SUSPEND_FREEZE },
-	[PM_SUSPEND_STANDBY] = { .label = "standby", },
-	[PM_SUSPEND_MEM] = { .label = "mem", },
+const char *const pm_states[PM_SUSPEND_MAX] = {
+	[PM_SUSPEND_FREEZE]	= "freeze",
+	[PM_SUSPEND_STANDBY]	= "standby",
+	[PM_SUSPEND_MEM]	= "mem",
 };
 
 static const struct platform_suspend_ops *suspend_ops;
@@ -63,33 +63,41 @@ void freeze_wake(void)
 }
 EXPORT_SYMBOL_GPL(freeze_wake);
 
-static bool valid_state(suspend_state_t state)
-{
-	/*
-	 * PM_SUSPEND_STANDBY and PM_SUSPEND_MEM states need low level
-	 * support and need to be valid to the low level
-	 * implementation, no valid callback implies that none are valid.
-	 */
-	return suspend_ops && suspend_ops->valid && suspend_ops->valid(state);
-}
-
 /**
  * suspend_set_ops - Set the global suspend method table.
  * @ops: Suspend operations to use.
  */
 void suspend_set_ops(const struct platform_suspend_ops *ops)
 {
-	suspend_state_t i;
-
 	lock_system_sleep();
-
 	suspend_ops = ops;
-	for (i = PM_SUSPEND_STANDBY; i <= PM_SUSPEND_MEM; i++)
-		pm_states[i].state = valid_state(i) ? i : 0;
-
 	unlock_system_sleep();
 }
 EXPORT_SYMBOL_GPL(suspend_set_ops);
+
+bool valid_state(suspend_state_t state)
+{
+	if (state == PM_SUSPEND_FREEZE) {
+#ifdef CONFIG_PM_DEBUG
+		if (pm_test_level != TEST_NONE &&
+		    pm_test_level != TEST_FREEZER &&
+		    pm_test_level != TEST_DEVICES &&
+		    pm_test_level != TEST_PLATFORM) {
+			printk(KERN_WARNING "Unsupported pm_test mode for "
+					"freeze state, please choose "
+					"none/freezer/devices/platform.\n");
+			return false;
+		}
+#endif
+			return true;
+	}
+	/*
+	 * PM_SUSPEND_STANDBY and PM_SUSPEND_MEMORY states need lowlevel
+	 * support and need to be valid to the lowlevel
+	 * implementation, no valid callback implies that none are valid.
+	 */
+	return suspend_ops && suspend_ops->valid && suspend_ops->valid(state);
+}
 
 /**
  * suspend_valid_only_mem - Generic memory-only valid callback.
@@ -167,6 +175,13 @@ void __attribute__ ((weak)) arch_suspend_enable_irqs(void)
  *
  * This function should be called after devices have been suspended.
  */
+/*lenovo.sw begin chenyb1, 20130516, Add for sysfs tlmm_before_sleep */
+#ifdef CONFIG_LENOVO_PM_LOG
+extern void vreg_before_sleep_save_configs(void);
+extern void tlmm_before_sleep_set_configs(void);
+extern void tlmm_before_sleep_save_configs(void);
+#endif//#ifdef CONFIG_LENOVO_PM_LOG
+/*lenovo.sw end chenyb1, 20130516, Add for sysfs tlmm_before_sleep */
 static int suspend_enter(suspend_state_t state, bool *wakeup)
 {
 	int error;
@@ -202,6 +217,16 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		freeze_enter();
 		goto Platform_wake;
 	}
+
+	/*lenovo.sw begin chenyb1, 20130516, Add for sysfs tlmm_before_sleep. */
+#ifdef CONFIG_LENOVO_PM_LOG
+	vreg_before_sleep_save_configs();
+#if 1 //TBD
+	tlmm_before_sleep_set_configs();
+	tlmm_before_sleep_save_configs();
+#endif
+#endif//#ifdef CONFIG_LENOVO_PM_LOG
+	/*lenovo.sw end chenyb1, 20130516, Add for sysfs tlmm_before_sleep.  */
 
 	error = disable_nonboot_cpus();
 	if (error || suspend_test(TEST_CPUS))
@@ -305,62 +330,6 @@ static void suspend_finish(void)
 	pm_restore_console();
 }
 
-#ifdef CONFIG_PM_SYNC_BEFORE_SUSPEND
-/**
- * Sync the filesystem in seperate workqueue.
- * Then check it finishing or not periodically and
- * abort if any wakeup source comes in. That can reduce
- * the wakeup latency
- *
- */
-static bool sys_sync_completed = false;
-static void sys_sync_work_func(struct work_struct *work);
-static DECLARE_WORK(sys_sync_work, sys_sync_work_func);
-static DECLARE_WAIT_QUEUE_HEAD(sys_sync_wait);
-static void sys_sync_work_func(struct work_struct *work)
-{
-	printk(KERN_INFO "PM: Syncing filesystems ... \n");
-	sys_sync();
-	sys_sync_completed = true;
-	wake_up(&sys_sync_wait);
-}
-
-static int sys_sync_queue(void)
-{
-	int work_status = work_busy(&sys_sync_work);
-
-	/* Check if the previous work still running. */
-	if (!(work_status & WORK_BUSY_PENDING)) {
-		if (work_status & WORK_BUSY_RUNNING) {
-			while (wait_event_timeout(sys_sync_wait,
-					sys_sync_completed,
-					msecs_to_jiffies(100)) == 0) {
-				if (pm_wakeup_pending()) {
-					pr_info("PM: Pre-Syncing abort\n");
-					goto abort;
-				}
-			}
-			pr_info("PM: Pre-Syncing done\n");
-		}
-		sys_sync_completed = false;
-		schedule_work(&sys_sync_work);
-	}
-
-	while (wait_event_timeout(sys_sync_wait, sys_sync_completed,
-			msecs_to_jiffies(100)) == 0) {
-		if (pm_wakeup_pending()) {
-			pr_info("PM: Syncing abort\n");
-			goto abort;
-		}
-	}
-
-	pr_info("PM: Syncing done\n");
-	return 0;
-abort:
-	return -EAGAIN;
-}
-#endif
-
 /**
  * enter_state - Do common work needed to enter system sleep state.
  * @state: System sleep state to enter.
@@ -373,30 +342,20 @@ static int enter_state(suspend_state_t state)
 {
 	int error;
 
-	if (state == PM_SUSPEND_FREEZE) {
-#ifdef CONFIG_PM_DEBUG
-		if (pm_test_level != TEST_NONE && pm_test_level <= TEST_CPUS) {
-			pr_warning("PM: Unsupported test mode for freeze state,"
-				   "please choose none/freezer/devices/platform.\n");
-			return -EAGAIN;
-		}
-#endif
-	} else if (!valid_state(state)) {
-		return -EINVAL;
-	}
+	if (!valid_state(state))
+		return -ENODEV;
+
 	if (!mutex_trylock(&pm_mutex))
 		return -EBUSY;
 
 	if (state == PM_SUSPEND_FREEZE)
 		freeze_begin();
 
-#ifdef CONFIG_PM_SYNC_BEFORE_SUSPEND
-	error = sys_sync_queue();
-	if (error)
-		goto Unlock;
-#endif
+	printk(KERN_INFO "PM: Syncing filesystems ... ");
+	sys_sync();
+	printk("done.\n");
 
-	pr_debug("PM: Preparing system for %s sleep\n", pm_states[state].label);
+	pr_debug("PM: Preparing system for %s sleep\n", pm_states[state]);
 	error = suspend_prepare(state);
 	if (error)
 		goto Unlock;
@@ -404,7 +363,7 @@ static int enter_state(suspend_state_t state)
 	if (suspend_test(TEST_FREEZER))
 		goto Finish;
 
-	pr_debug("PM: Entering %s sleep\n", pm_states[state].label);
+	pr_debug("PM: Entering %s sleep\n", pm_states[state]);
 	pm_restrict_gfp_mask();
 	error = suspend_devices_and_enter(state);
 	pm_restore_gfp_mask();
@@ -436,6 +395,12 @@ static void pm_suspend_marker(char *annotation)
  * Check if the value of @state represents one of the supported states,
  * execute enter_state() and update system suspend statistics.
  */
+/* chenyb1, 20130524, Add sleeplog, START */
+#ifdef CONFIG_LENOVO_PM_LOG
+extern void log_suspend_enter(void);
+extern void log_suspend_exit(int error);
+#endif //#ifdef CONFIG_LENOVO_PM_LOG
+/* chenyb1, 20130524, Add sleeplog, END */
 int pm_suspend(suspend_state_t state)
 {
 	int error;
@@ -444,6 +409,11 @@ int pm_suspend(suspend_state_t state)
 		return -EINVAL;
 
 	pm_suspend_marker("entry");
+	/* chenyb1, 20130524, Add sleeplog START*/
+#ifdef CONFIG_LENOVO_PM_LOG
+	log_suspend_enter();
+#endif
+	/* chenyb1, 20130524, Add sleeplog END*/
 	error = enter_state(state);
 	if (error) {
 		suspend_stats.fail++;
@@ -451,6 +421,11 @@ int pm_suspend(suspend_state_t state)
 	} else {
 		suspend_stats.success++;
 	}
+	/* chenyb1, 20130524, Add sleeplog START*/
+#ifdef CONFIG_LENOVO_PM_LOG
+	log_suspend_exit(error);
+#endif //#ifdef CONFIG_LENOVO_PM_LOG
+	/* chenyb1, 20130524, Add sleeplog END*/
 	pm_suspend_marker("exit");
 	return error;
 }

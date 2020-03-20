@@ -21,9 +21,7 @@
 #include <linux/leds.h>
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
-#if defined(CONFIG_MACH_OPPO) && defined(CONFIG_BACKLIGHT_LM3630)
-#include <soc/oppo/oppo_project.h>
-#endif
+#include <linux/display_state.h>
 
 #include "mdss_dsi.h"
 #include "mdss_livedisplay.h"
@@ -39,11 +37,14 @@
 #define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
 
-DEFINE_LED_TRIGGER(bl_led_trigger);
+bool display_on = true;
 
-#if defined(CONFIG_MACH_OPPO) && defined(CONFIG_BACKLIGHT_LM3630)
-extern int lm3630_bank_a_update_status(u32 bl_level);
-#endif
+bool is_display_on()
+{
+	return display_on;
+}
+
+DEFINE_LED_TRIGGER(bl_led_trigger);
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -201,7 +202,8 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
-	pr_debug("%s: level=%d\n", __func__, level);
+	//pr_debug("%s: level=%d\n", __func__, level);
+	printk("[houdz1]%s: pid =%d name= %s  level=%d\n", __func__, current->pid,current->comm,level);//lenoco.sw2 houdz1 add
 
 	led_pwm1[1] = (unsigned char)level;
 
@@ -219,6 +221,20 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
 
+	if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio)) {
+		rc = gpio_request(ctrl_pdata->disp_vsp_gpio,	"disp_vsp");
+		if (rc) {
+			pr_err("request disp_vsp gpio failed, rc=%d\n", rc);
+			goto disp_vsp_gpio_err;
+		}
+	}
+	if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio)) {
+		rc = gpio_request(ctrl_pdata->disp_vsn_gpio, "disp_vsn");
+		if (rc) {
+			pr_err("request disp_vsn gpio failed, rc=%d\n", rc);
+			goto disp_vsn_gpio_err;
+		}
+	}
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 		rc = gpio_request(ctrl_pdata->disp_en_gpio,
 						"disp_enable");
@@ -262,14 +278,23 @@ rst_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 		gpio_free(ctrl_pdata->disp_en_gpio);
 disp_en_gpio_err:
+	if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio))
+		gpio_free(ctrl_pdata->disp_vsn_gpio);
+disp_vsn_gpio_err:
+	if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio))
+		gpio_free(ctrl_pdata->disp_vsp_gpio);
+disp_vsp_gpio_err:
 	return rc;
 }
 
+extern int lm36923_config_20ma(void);//lenovo.sw2 houdz1 add
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
 	int i, rc = 0;
+
+	printk("%s:enable = %d start\n",__func__,enable);
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -303,6 +328,18 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
 
+			/* lenovo.sw2 houdz1 add for lcd VSP/VSN enable begin*/
+			if (gpio_is_valid(ctrl_pdata->rst_gpio))
+				gpio_direction_output((ctrl_pdata->rst_gpio), 0);
+			mdelay(1);
+			if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio))
+				gpio_direction_output((ctrl_pdata->disp_vsp_gpio), 1);
+				mdelay(1);
+			if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio))
+				gpio_direction_output((ctrl_pdata->disp_vsn_gpio), 1);
+				mdelay(15);
+			/* lenovo.sw2 houdz1 add for lcd VSP/VSN enable end*/
+
 			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
 				gpio_set_value((ctrl_pdata->rst_gpio),
 					pdata->panel_info.rst_seq[i]);
@@ -312,6 +349,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 
 			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
+			if(lm36923_config_20ma()) pr_err("i2c lm36923 config fail!now the max current is 25mA\n");//lenovo.sw2 houdz1 add
 		}
 
 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
@@ -339,7 +377,18 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
+		/*lenovo.sw2 houdz1 add : add "disp_vsp_gpio" and "disp_vsp_gpio "begin*/
+		if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio)) {
+			gpio_set_value((ctrl_pdata->disp_vsp_gpio), 0);
+			gpio_free(ctrl_pdata->disp_vsp_gpio);
+		}
+		if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio)) {
+			gpio_set_value((ctrl_pdata->disp_vsn_gpio), 0);
+			gpio_free(ctrl_pdata->disp_vsn_gpio);
+		}
+		/*lenovo.sw2 houdz1 add : add "disp_vsp_gpio" and "disp_vsp_gpio "end*/
 	}
+	printk("%s:enable = %d end\n",__func__,enable);
 	return rc;
 }
 
@@ -603,21 +652,27 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 			__func__);
 		break;
 	}
-#if defined(CONFIG_MACH_OPPO) && defined(CONFIG_BACKLIGHT_LM3630)
-	if (is_project(OPPO_15109))
-		lm3630_bank_a_update_status(bl_level);
-#endif
 }
 
+/*lenovo.sw2 houdz1 add  begin*/
+#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
+extern int lenovo_updata_effect_code(struct mdss_dsi_ctrl_pdata *ctrl_data);
+#endif
+/*lenovo.sw2 houdz1 add  end*/
 static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo;
+#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
+	struct dsi_panel_cmds saveCmds;//lenovo.sw2 houdz1 add
+#endif
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
+
+	display_on = true;
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -630,8 +685,20 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 			goto end;
 	}
 
+/*lenovo.sw2 houdz1 add  begin*/
+
+
+#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
+	saveCmds.cmds = ctrl->on_cmds.cmds;
+	saveCmds.cmd_cnt= ctrl->on_cmds.cmd_cnt;
+	lenovo_updata_effect_code(ctrl);
+	mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+	ctrl->on_cmds.cmds = saveCmds.cmds;
+	ctrl->on_cmds.cmd_cnt = saveCmds.cmd_cnt;
+#else
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+#endif
 
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
@@ -684,6 +751,8 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
+
+	display_on = false;
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -1269,7 +1338,8 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		struct mdss_panel_info *pinfo)
 {
 	int rc = 0;
-	u32 tmp = 0;
+/*delta
+	u32 tmp = 0; */
 	rc = of_property_read_u32(pan_node,
 			"qcom,mdss-dsi-min-refresh-rate",
 			&pinfo->min_fps);
@@ -1283,7 +1353,7 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		 */
 		pinfo->min_fps = MIN_REFRESH_RATE;
 		rc = 0;
-	}
+	} 
 
 	rc = of_property_read_u32(pan_node,
 			"qcom,mdss-dsi-max-refresh-rate",
@@ -1301,6 +1371,7 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		rc = 0;
 	}
 
+/*delta
 	rc = of_property_read_u32(pan_node,
 			"qcom,mdss-dsi-idle-refresh-rate",
 			&tmp);
@@ -1308,6 +1379,7 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		pinfo->idle_fps = tmp;
 	}
 
+*/
 	pr_info("dyn_fps: min = %d, max = %d\n",
 			pinfo->min_fps, pinfo->max_fps);
 	return rc;
@@ -1538,6 +1610,12 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	data = of_get_property(np, "qcom,mdss-dsi-panel-type", NULL);
 	if (data && !strncmp(data, "dsi_cmd_mode", 12))
 		pinfo->mipi.mode = DSI_CMD_MODE;
+	/*lenovo.sw2 houdz1 add begin*/
+	tmp = 0;
+	rc = of_property_read_u32(np, "lenovo,panel_id", &tmp);
+	ctrl_pdata->panel_id = (!rc ? tmp : 0);
+
+	/*lenovo.sw2 houdz1 add end*/
 	tmp = 0;
 	data = of_get_property(np, "qcom,mdss-dsi-pixel-packing", NULL);
 	if (data && !strcmp(data, "loose"))
@@ -1840,8 +1918,12 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			else
 				pr_err("TE-ESD not valid for video mode\n");
 		}
+		/*begin:lenovo.sw2 houdz1 add for p1 esd check*/
+		else if (!strcmp(data, "video_te_signal_check")) {
+				ctrl_pdata->status_mode = ESD_TE;
+		}
+		/*end:lenovo.sw2 houdz1 add for p1 esd check*/
 	}
-
 	pinfo->mipi.force_clk_lane_hs = of_property_read_bool(np,
 		"qcom,mdss-dsi-force-clock-lane-hs");
 
@@ -1857,9 +1939,32 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	mdss_dsi_parse_panel_horizintal_line_idle(np, ctrl_pdata);
 
 	mdss_dsi_parse_dfps_config(np, ctrl_pdata);
+        
+        mdss_livedisplay_parse_dt(np, pinfo);
 
-	mdss_livedisplay_parse_dt(np, pinfo);
+	/*lenovo.sw2 houdz1 add for lcd effect(start)*/
+	#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->custom_mode_cmds,
+		"lenovo,lcd-effect-custom-mode-command", "lenovo,lcd-effect-custom-mode-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->default_mode_cmds,
+		"lenovo,lcd-effect-default-mode-command", "lenovo,lcd-effect-default-mode-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->comfort_mode_cmds,
+		"lenovo,lcd-effect-comfort-mode-command", "lenovo,lcd-effect-comfort-mode-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->outside_mode_cmds,
+		"lenovo,lcd-effect-outside-mode-command", "lenovo,lcd-effect-outside-mode-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->ultra_mode_cmds,
+		"lenovo,lcd-effect-ultra-mode-command", "lenovo,lcd-effect-ultra-mode-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->camera_mode_cmds,
+		"lenovo,lcd-effect-camera-mode-command", "lenovo,lcd-effect-camera-mode-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->gamma_cmds,
+		"lenovo,lcd-effect-gamma-command", "lenovo,lcd-effect-gamma-command-state");
 
+	rc = of_property_read_u32(np, "lenovo,lcd-effect-gamma-command-count", &tmp);
+	ctrl_pdata->gamma_count = (!rc ? tmp : 0);
+	printk("[houdz1]%s,gamma_cmds_cnt = %d ,gamma_cnt = %d, panel_id=%d\n",__func__,ctrl_pdata->gamma_cmds.cmd_cnt,ctrl_pdata->gamma_count,ctrl_pdata->panel_id);
+	ctrl_pdata->is_ultra_mode = 0;
+	#endif
+	/*lenovo.sw2 houdz1 add for lcd effect(end)*/
 	return 0;
 
 error:

@@ -1630,11 +1630,11 @@ static int _regulator_do_enable(struct regulator_dev *rdev)
 	trace_regulator_enable(rdev_get_name(rdev));
 
 	if (rdev->ena_pin) {
-		if (!rdev->ena_gpio_state) {
-			ret = regulator_ena_gpio_ctrl(rdev, true);
-			if (ret < 0)
-				return ret;
-			rdev->ena_gpio_state = 1;
+	if (!rdev->ena_gpio_state) {
+		ret = regulator_ena_gpio_ctrl(rdev, true);
+		if (ret < 0)
+			return ret;
+		rdev->ena_gpio_state = 1;
 		}
 	} else if (rdev->desc->ops->enable) {
 		ret = rdev->desc->ops->enable(rdev);
@@ -1712,6 +1712,14 @@ int regulator_enable(struct regulator *regulator)
 	struct regulator_dev *rdev = regulator->rdev;
 	int ret = 0;
 
+	/* lenovo.sw begin. chenyb1 add to dump ldo using info */
+	if (strstr(rdev_get_name(rdev), "l6"))
+		printk(KERN_WARNING "ldo=%s,supply=%s+\n", rdev_get_name(rdev), regulator->supply_name);
+	/* lenovo.sw end. chenyb1 add to dump ldo using info */
+	/* lenovo.sw begin. caoyi1 add to dump ldo using info */
+	if (strstr(rdev_get_name(rdev), "l17"))
+		printk(KERN_WARNING "ldo=%s,supply=%s+\n", rdev_get_name(rdev), regulator->supply_name);
+	/* lenovo.sw end. caoyi1 add to dump ldo using info */
 	if (regulator->always_on)
 		return 0;
 
@@ -1744,10 +1752,10 @@ static int _regulator_do_disable(struct regulator_dev *rdev)
 
 	if (rdev->ena_pin) {
 		if (rdev->ena_gpio_state) {
-			ret = regulator_ena_gpio_ctrl(rdev, false);
-			if (ret < 0)
-				return ret;
-			rdev->ena_gpio_state = 0;
+		ret = regulator_ena_gpio_ctrl(rdev, false);
+		if (ret < 0)
+			return ret;
+		rdev->ena_gpio_state = 0;
 		}
 
 	} else if (rdev->desc->ops->disable) {
@@ -1816,6 +1824,14 @@ int regulator_disable(struct regulator *regulator)
 	struct regulator_dev *rdev = regulator->rdev;
 	int ret = 0;
 
+	/* lenovo.sw begin. chenyb1 add to dump ldo using info */
+	if (strstr(rdev_get_name(rdev), "l6"))
+		printk(KERN_WARNING "ldo=%s,supply=%s-\n", rdev_get_name(rdev), regulator->supply_name);
+	/* lenovo.sw end. chenyb1 add to dump ldo using info */
+	/* lenovo.sw begin. caoyi1 add to dump ldo using info */
+	if (strstr(rdev_get_name(rdev), "l17"))
+		printk(KERN_WARNING "ldo=%s,supply=%s-\n", rdev_get_name(rdev), regulator->supply_name);
+	/* lenovo.sw end. caoyi1 add to dump ldo using info */
 	if (regulator->always_on)
 		return 0;
 
@@ -4033,6 +4049,12 @@ regulator_register(const struct regulator_desc *regulator_desc,
 				 config->ena_gpio, ret);
 			goto wash;
 		}
+
+		if (config->ena_gpio_flags & GPIOF_OUT_INIT_HIGH)
+			rdev->ena_gpio_state = 1;
+
+		if (config->ena_gpio_invert)
+			rdev->ena_gpio_state = !rdev->ena_gpio_state;
 	}
 
 	/* set regulator constraints */
@@ -4201,9 +4223,9 @@ int regulator_suspend_finish(void)
 		mutex_lock(&rdev->mutex);
 		if (rdev->use_count > 0  || rdev->constraints->always_on) {
 			if (!_regulator_is_enabled(rdev)) {
-				error = _regulator_do_enable(rdev);
-				if (error)
-					ret = error;
+			error = _regulator_do_enable(rdev);
+			if (error)
+				ret = error;
 			}
 		} else {
 			if (!has_full_constraints)
@@ -4222,6 +4244,121 @@ unlock:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(regulator_suspend_finish);
+
+/* yangjq, 20130513, Add for vreg debug, START */
+#define VREG_NUM_MAX 64
+
+int vreg_dump_info(char* buf)
+{
+	char* p = buf;
+	struct regulator_dev *rdev;
+	unsigned on, mv;
+	int id;
+
+	mutex_lock(&regulator_list_mutex);
+
+	id = 0;
+	list_for_each_entry(rdev, &regulator_list, list) {
+		struct regulator_ops *ops = rdev->desc->ops;
+
+		p += sprintf(p, "[%2d]%10s: ", id++, rdev->desc->name);
+
+		on = mv = 0;
+		mutex_lock(&rdev->mutex);
+
+		if (ops->is_enabled)
+			on = ops->is_enabled(rdev);
+		if (ops->get_voltage)
+			mv = ops->get_voltage(rdev) / 1000;
+
+		mutex_unlock(&rdev->mutex);
+
+		p += sprintf(p, "%s ", on ? "on " : "off");
+		p += sprintf(p, "%4d mv ", mv);
+		p += sprintf(p, "\n");
+	}
+
+	mutex_unlock(&regulator_list_mutex);
+
+	return p - buf;
+}
+
+
+/* save vreg config before sleep */
+static unsigned before_sleep_fetched;
+static unsigned before_sleep_configs[VREG_NUM_MAX];
+void vreg_before_sleep_save_configs(void)
+{
+	struct regulator_dev *rdev;
+	unsigned on, mv;
+	int id;
+
+	//only save vreg configs when it has been fetched
+	if (!before_sleep_fetched)
+		return;
+
+	printk("%s(), before_sleep_fetched=%d\n", __func__, before_sleep_fetched);
+	before_sleep_fetched = false;
+
+	mutex_lock(&regulator_list_mutex);
+
+	id = 0;
+	list_for_each_entry(rdev, &regulator_list, list) {
+		struct regulator_ops *ops = rdev->desc->ops;
+
+		on = mv = 0;
+		mutex_lock(&rdev->mutex);
+
+		if (ops->is_enabled)
+			on = ops->is_enabled(rdev);
+		if (ops->get_voltage)
+			mv = ops->get_voltage(rdev) / 1000;
+
+		mutex_unlock(&rdev->mutex);
+
+		before_sleep_configs[id] = mv | (on << 31);
+		if (++id >= VREG_NUM_MAX)
+			break;
+	}
+
+	mutex_unlock(&regulator_list_mutex);
+}
+
+int vreg_before_sleep_dump_info(char* buf)
+{
+	char* p = buf;
+
+	p += sprintf(p, "vreg_before_sleep:\n");
+	if (!before_sleep_fetched) {
+		struct regulator_dev *rdev;
+		unsigned on, mv;
+		int id;
+
+		before_sleep_fetched = true;
+
+		mutex_lock(&regulator_list_mutex);
+
+		id = 0;
+		list_for_each_entry(rdev, &regulator_list, list) {
+			p += sprintf(p, "[%2d]%10s: ", id, rdev->desc->name);
+
+			mv = before_sleep_configs[id];
+			on = (mv & 0x80000000) >> 31;
+			mv &= ~0x80000000;
+
+			p += sprintf(p, "%s ", on ? "on " : "off");
+			p += sprintf(p, "%4d mv ", mv);
+			p += sprintf(p, "\n");
+
+			if (++id >= VREG_NUM_MAX)
+				break;
+		}
+
+		mutex_unlock(&regulator_list_mutex);
+	}
+	return p - buf;	
+}
+/* yangjq, 20130513, Add for vreg debug, END */
 
 /**
  * regulator_has_full_constraints - the system has fully specified constraints

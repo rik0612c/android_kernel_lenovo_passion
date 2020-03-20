@@ -53,7 +53,6 @@ static struct mux_div_clk a53ssmux_bc = {
 	},
 	.c = {
 		.dbg_name = "a53ssmux_bc",
-		.flags = CLKFLAG_NO_RATE_CACHE,
 		.ops = &clk_ops_mux_div_clk,
 		.vdd_class = &vdd_cpu_bc,
 		CLK_INIT(a53ssmux_bc.c),
@@ -74,7 +73,6 @@ static struct mux_div_clk a53ssmux_lc = {
 	},
 	.c = {
 		.dbg_name = "a53ssmux_lc",
-		.flags = CLKFLAG_NO_RATE_CACHE,
 		.ops = &clk_ops_mux_div_clk,
 		.vdd_class = &vdd_cpu_lc,
 		CLK_INIT(a53ssmux_lc.c),
@@ -113,6 +111,24 @@ static struct clk_lookup cpu_clocks_8939[] = {
 
 static struct mux_div_clk *a53ssmux[] = {&a53ssmux_bc,
 						&a53ssmux_lc, &a53ssmux_cci};
+
+//chenyb1, 20140922, Add to show AP's clock rate in /sys/private/pm_status, START
+#ifdef CONFIG_LENOVO_PM_LOG
+unsigned long acpu_clk_get_rate(int cpu)
+{
+	unsigned long cur_rate;
+
+#if 0
+	struct clk *c = cpu_clk[cpu];
+	cur_rate = clk_get_rate(c);
+#else
+	cur_rate = clk_get_rate(&a53ssmux[cpu/4]->c);
+#endif
+
+	return cur_rate;
+}
+#endif //#ifdef CONFIG_LENOVO_PM_LOG
+//chenyb1, 20140922, Add to show AP's clock rate in /sys/private/pm_status, END
 
 static int of_get_fmax_vdd_class(struct platform_device *pdev, struct clk *c,
 								char *prop_name)

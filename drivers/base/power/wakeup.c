@@ -82,8 +82,6 @@ struct wakeup_source *wakeup_source_create(const char *name)
 	if (!ws)
 		return NULL;
 
-	ws->inserted = false;
-
 	wakeup_source_prepare(ws, name ? kstrdup(name, GFP_KERNEL) : NULL);
 	return ws;
 }
@@ -149,10 +147,7 @@ void wakeup_source_add(struct wakeup_source *ws)
 	ws->last_time = ktime_get();
 
 	spin_lock_irqsave(&events_lock, flags);
-	if (!ws->inserted) {
-		list_add_rcu(&ws->entry, &wakeup_sources);
-		ws->inserted = true;
-	}
+	list_add_rcu(&ws->entry, &wakeup_sources);
 	spin_unlock_irqrestore(&events_lock, flags);
 }
 EXPORT_SYMBOL_GPL(wakeup_source_add);
@@ -169,10 +164,7 @@ void wakeup_source_remove(struct wakeup_source *ws)
 		return;
 
 	spin_lock_irqsave(&events_lock, flags);
-	if (ws->inserted) {
-		list_del_rcu(&ws->entry);
-		ws->inserted = false;
-	}
+	list_del_rcu(&ws->entry);
 	spin_unlock_irqrestore(&events_lock, flags);
 	synchronize_rcu();
 }
@@ -355,10 +347,16 @@ int device_init_wakeup(struct device *dev, bool enable)
 {
 	int ret = 0;
 
+	if (!dev)
+		return -EINVAL;
+
 	if (enable) {
 		device_set_wakeup_capable(dev, true);
 		ret = device_wakeup_enable(dev);
 	} else {
+		if (dev->power.can_wakeup)
+			device_wakeup_disable(dev);
+
 		device_set_wakeup_capable(dev, false);
 	}
 
@@ -378,6 +376,20 @@ int device_set_wakeup_enable(struct device *dev, bool enable)
 	return enable ? device_wakeup_enable(dev) : device_wakeup_disable(dev);
 }
 EXPORT_SYMBOL_GPL(device_set_wakeup_enable);
+
+/**
+ * wakeup_source_not_registered - validate the given wakeup source.
+ * @ws: Wakeup source to be validated.
+ */
+static bool wakeup_source_not_registered(struct wakeup_source *ws)
+{
+	/*
+	 * Use timer struct to check if the given source is initialized
+	 * by wakeup_source_add.
+	 */
+	return ws->timer.function != pm_wakeup_timer_fn ||
+		   ws->timer.data != (unsigned long)ws;
+}
 
 /*
  * The functions below use the observation that each wakeup event starts a
@@ -418,6 +430,10 @@ EXPORT_SYMBOL_GPL(device_set_wakeup_enable);
 static void wakeup_source_activate(struct wakeup_source *ws)
 {
 	unsigned int cec;
+
+	if (WARN(wakeup_source_not_registered(ws),
+			"unregistered wakeup source\n"))
+		return;
 
 	/*
 	 * active wakeup source should bring the system
@@ -911,6 +927,35 @@ static int wakeup_sources_stats_show(struct seq_file *m, void *unused)
 
 	return 0;
 }
+
+/* lenovo.sw begin chenyb1 20141107 add to dump wakelock info for power */
+#ifdef CONFIG_LENOVO_PM_LOG
+int wakelock_dump_info(char* buf)
+{
+	struct wakeup_source *ws;
+	unsigned long flags;
+	char* p = buf;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(ws, &wakeup_sources, entry)
+	{
+		spin_lock_irqsave(&ws->lock, flags);
+		if (ws->active) {
+			long timeout = ws->timer_expires - jiffies;
+			if (timeout > 0)
+				p += sprintf(p, "   (active)[%s], time left %ld (jiffies)\n",
+					ws->name, timeout);
+			else // active
+				p += sprintf(p, "   (active)[%s]\n", ws->name);
+		}
+		spin_unlock_irqrestore(&ws->lock, flags);
+	}
+	rcu_read_unlock();
+	
+	return p - buf;
+}
+#endif //#ifdef CONFIG_LENOVO_PM_LOG
+/* lenovo.sw end chenyb1 20141107 add to dump wakelock info for power */
 
 static int wakeup_sources_stats_open(struct inode *inode, struct file *file)
 {

@@ -493,25 +493,6 @@ int qpnp_pon_trigger_config(enum pon_trigger_source pon_src, bool enable)
 }
 EXPORT_SYMBOL(qpnp_pon_trigger_config);
 
-#ifdef CONFIG_MACH_OPPO
-int qpnp_silence_write(u16 addr, u8 val)
-{
-	int rc;
-	u8 reg;
-	struct qpnp_pon *pon = sys_reset_dev;
-
-	reg = val;
-
-	rc = spmi_ext_register_writel(pon->spmi->ctrl, pon->spmi->sid,
-				      addr, &reg, 1);
-	if (rc)
-		dev_err(&pon->spmi->dev,
-			"Unable to write to addr=%x, rc(%d)\n", addr, rc);
-	return rc;
-}
-EXPORT_SYMBOL(qpnp_silence_write);
-#endif
-
 /*
  * This function stores the PMIC warm reset reason register values. It also
  * clears these registers if the qcom,clear-warm-reset device tree property
@@ -662,7 +643,6 @@ static irqreturn_t qpnp_kpdpwr_resin_bark_irq(int irq, void *_pon)
 	return IRQ_HANDLED;
 }
 
-#ifndef CONFIG_MACH_OPPO
 static irqreturn_t qpnp_cblpwr_irq(int irq, void *_pon)
 {
 	int rc;
@@ -674,30 +654,6 @@ static irqreturn_t qpnp_cblpwr_irq(int irq, void *_pon)
 
 	return IRQ_HANDLED;
 }
-#else
-#define CBL_POWER_ON_VALID_REG			0x810
-#define CBL_POWER_ON_VALID_MASK			BIT(2)
-#define CBL_POWER_ON_VALID				BIT(2)
-extern void opchg_usbin_valid_irq_handler(bool usb_present);
-
-static irqreturn_t qpnp_cblpwr_irq(int irq, void *_pon)
-{
-	struct qpnp_pon *pon = _pon;
-	int rc;
-	u8 valid_sta;
-
-	rc = spmi_ext_register_readl(pon->spmi->ctrl, pon->spmi->sid,
-				CBL_POWER_ON_VALID_REG, &valid_sta, 1);
-	if (rc) {
-		dev_err(&pon->spmi->dev, "Unable to read PON RT status\n");
-	} else {
-		bool usb_present = (valid_sta & CBL_POWER_ON_VALID_MASK) != 0;
-		pr_info("%s usbin-valid triggered: %d\n", __func__, usb_present);
-		opchg_usbin_valid_irq_handler(usb_present);
-	}
-	return IRQ_HANDLED;
-}
-#endif
 
 static void print_pon_reg(struct qpnp_pon *pon, u16 offset)
 {
@@ -1001,9 +957,6 @@ qpnp_pon_request_irqs(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
 							cfg->state_irq);
 			return rc;
 		}
-#ifdef CONFIG_MACH_OPPO
-		enable_irq_wake(cfg->state_irq);
-#endif
 		break;
 	case PON_KPDPWR_RESIN:
 		if (cfg->use_bark) {
