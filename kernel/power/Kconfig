@@ -288,8 +288,7 @@ config SUSPEND_TIME
 	  Prints the time spent in suspend in the kernel log, and
 	  keeps statistics on the time spent in suspend in
 	  /sys/kernel/debug/suspend_time
-
-config PM_SYNC_BEFORE_SUSPEND
-	bool "Sync file systems before suspend"
-	depends on SUSPEND
-	default y
+#lenovo.sw chenyb1 20150310 add for pm log begin
+config LENOVO_PM_LOG
+    def_bool y
+#lenovo.sw chenyb1 20150310 add for pm log end

@@ -26,7 +26,7 @@
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
 
-#define ALARM_DELTA 120
+#define ALARM_DELTA 300
 
 /**
  * struct alarm_base - Alarm timer bases
@@ -56,6 +56,47 @@ static struct rtc_device	*rtcdev;
 static DEFINE_SPINLOCK(rtcdev_lock);
 static unsigned long power_on_alarm;
 static struct mutex power_on_alarm_lock;
+
+//lenovo sw yexh1 add for power-off alarm
+unsigned long deviceup_power_on_alarmtime = 0;//lenovo poweroff alarm 
+int alarm_set_deviceup(struct rtc_device *rtc, struct rtc_wkalrm *alarm);
+void alarm_set_real_rtc(int alarm_type,  struct timespec new_alarm_time)
+{
+        struct rtc_wkalrm   rtc_alarm;
+        struct rtc_time     rtc_current_rtc_time;
+        unsigned long       rtc_current_time;
+        unsigned long       rtc_alarm_time;
+        struct timespec     rtc_delta;
+        struct timespec     wall_time;
+
+        printk("alarm_set_real_rtc alarm: %d, %ld.%ld\n", alarm_type,
+                new_alarm_time.tv_sec, new_alarm_time.tv_nsec);
+
+        if (new_alarm_time.tv_sec == 0 && new_alarm_time.tv_nsec == 0)
+        {
+        	 deviceup_power_on_alarmtime=0;
+                rtc_read_time(rtcdev, &rtc_alarm.time);
+                rtc_alarm.enabled = 0;
+                alarm_set_deviceup(rtcdev, &rtc_alarm);
+        }
+        else
+        {
+        	  deviceup_power_on_alarmtime = new_alarm_time.tv_sec;
+                rtc_read_time(rtcdev, &rtc_current_rtc_time);
+                getnstimeofday(&wall_time);
+                rtc_tm_to_time(&rtc_current_rtc_time, &rtc_current_time);
+                set_normalized_timespec(&rtc_delta,
+                                        wall_time.tv_sec - rtc_current_time,
+                                        wall_time.tv_nsec);
+
+                rtc_alarm_time = timespec_sub(new_alarm_time, rtc_delta).tv_sec;
+
+                rtc_time_to_tm(rtc_alarm_time, &rtc_alarm.time);
+                rtc_alarm.enabled = 1;
+		alarm_set_deviceup(rtcdev, &rtc_alarm);
+        }
+}
+//lenovo sw yexh1 add for power-off alarm, end
 
 void set_power_on_alarm(long secs, bool enable)
 {
@@ -577,8 +618,8 @@ static enum alarmtimer_restart alarm_handle_timer(struct alarm *alarm,
 
 	spin_lock_irqsave(&ptr->it_lock, flags);
 	if ((ptr->it_sigev_notify & ~SIGEV_THREAD_ID) != SIGEV_NONE) {
-		if (posix_timer_event(ptr, 0) != 0)
-			ptr->it_overrun++;
+	if (posix_timer_event(ptr, 0) != 0)
+		ptr->it_overrun++;
 	}
 
 	/* Re-add periodic timers */
@@ -655,18 +696,22 @@ static int alarm_timer_create(struct k_itimer *new_timer)
  * @new_timer: k_itimer pointer
  * @cur_setting: itimerspec data to fill
  *
- * Copies the itimerspec data out from the k_itimer
+ * Copies out the current itimerspec data
  */
 static void alarm_timer_get(struct k_itimer *timr,
 				struct itimerspec *cur_setting)
 {
-	memset(cur_setting, 0, sizeof(struct itimerspec));
+	ktime_t relative_expiry_time =
+		alarm_expires_remaining(&(timr->it.alarm.alarmtimer));
 
-	cur_setting->it_interval =
-			ktime_to_timespec(timr->it.alarm.interval);
-	cur_setting->it_value =
-		ktime_to_timespec(timr->it.alarm.alarmtimer.node.expires);
-	return;
+	if (ktime_to_ns(relative_expiry_time) > 0) {
+		cur_setting->it_value = ktime_to_timespec(relative_expiry_time);
+	} else {
+		cur_setting->it_value.tv_sec = 0;
+		cur_setting->it_value.tv_nsec = 0;
+	}
+
+	cur_setting->it_interval = ktime_to_timespec(timr->it.alarm.interval);
 }
 
 /**
@@ -716,6 +761,15 @@ static int alarm_timer_set(struct k_itimer *timr, int flags,
 
 	/* start the timer */
 	timr->it.alarm.interval = timespec_to_ktime(new_setting->it_interval);
+
+	/*
+	 * Rate limit to the tick as a hot fix to prevent DOS. Will be
+	 * mopped up later.
+	 */
+	if (timr->it.alarm.interval.tv64 &&
+			ktime_to_ns(timr->it.alarm.interval) < TICK_NSEC)
+		timr->it.alarm.interval = ktime_set(0, TICK_NSEC);
+
 	exp = timespec_to_ktime(new_setting->it_value);
 	/* Convert (if necessary) to absolute time */
 	if (flags != TIMER_ABSTIME) {
@@ -901,6 +955,84 @@ out:
 	return ret;
 }
 
+//lenovo sw yexh1 add for power-off alarm
+extern int qpnp_acorusb_pw;
+static void alarm_shutdown(struct platform_device *dev)
+{
+	int rc = 0;
+	struct rtc_wkalrm   rtc_alarm;
+	struct rtc_time     rtc_current_rtc_time;
+	unsigned long       rtc_current_time;
+	unsigned long       rtc_alarm_time;
+	struct timespec     rtc_delta;
+	struct timespec     wall_time;
+	struct timespec      pwroff_alarm;
+   
+	rc = mutex_lock_interruptible(&power_on_alarm_lock);
+	if (deviceup_power_on_alarmtime)
+    {
+		rtc_read_time(rtcdev, &rtc_current_rtc_time);
+		getnstimeofday(&wall_time);
+		rtc_tm_to_time(&rtc_current_rtc_time, &rtc_current_time);
+		set_normalized_timespec(&rtc_delta,
+					wall_time.tv_sec - rtc_current_time,
+					wall_time.tv_nsec);
+              pwroff_alarm.tv_sec = deviceup_power_on_alarmtime;
+	       pwroff_alarm.tv_nsec = 0;
+		rtc_alarm_time = timespec_sub(pwroff_alarm,
+			rtc_delta).tv_sec;
+	if (rtc_alarm_time <= rtc_current_time)
+		goto disable_alarm;
+
+		rtc_time_to_tm(rtc_alarm_time, &rtc_alarm.time);
+		rtc_alarm.enabled = 1;
+	        rc = rtc_set_alarm(rtcdev, &rtc_alarm);
+	if (rc)
+		printk("alarm_shutdown Unable to set power-on alarm\n");
+	else
+		printk("alarm_shutdown Power-on alarm set to %lu\n",
+				rtc_alarm_time);
+	}else if(1 == qpnp_acorusb_pw)
+    {
+        rtc_read_alarm(rtcdev,&rtc_alarm);
+        rtc_read_time(rtcdev, &rtc_current_rtc_time);
+        rtc_tm_to_time(&rtc_current_rtc_time, &rtc_current_time);
+        rtc_tm_to_time(&rtc_alarm.time, &rtc_alarm_time);
+        if (rtc_alarm_time > rtc_current_time)
+        {
+            rtc_alarm.enabled = 1;
+            alarm_set_deviceup(rtcdev,&rtc_alarm);
+        }else
+        {
+            printk("alarm_shutdown qpnp_acorusb_pw=%d goto disable_alarm \n",qpnp_acorusb_pw);
+            goto disable_alarm;
+        }
+    }
+    else
+    {
+        goto disable_alarm;
+    }
+	mutex_unlock(&power_on_alarm_lock);
+	return;
+
+disable_alarm:
+    printk("alarm_shutdown disable_alarm \r\n");
+    rtc_alarm_time = 0;
+    rtc_time_to_tm(rtc_alarm_time, &rtc_alarm.time);
+    rtc_alarm.enabled = 0;
+    rc = alarm_set_deviceup(rtcdev, &rtc_alarm);
+
+    rtc_alarm_irq_enable(rtcdev, 0);
+	if (rc){
+		printk("alarm_shutdown disable_alarm fail to set power-on alarm rc=%d \n",rc);
+    }else{
+		printk("alarm_shutdown disable_alarm ok Power-on alarm set to %lu\n",
+				rtc_alarm_time);
+    }
+	mutex_unlock(&power_on_alarm_lock);
+    return;
+}
+//lenovo sw yexh1 add for power-off alarm, end
 
 /* Suspend hook structures */
 static const struct dev_pm_ops alarmtimer_pm_ops = {
@@ -909,10 +1041,14 @@ static const struct dev_pm_ops alarmtimer_pm_ops = {
 };
 
 static struct platform_driver alarmtimer_driver = {
+//lenovo sw yexh1 add for power-off alarm
 	.driver = {
 		.name = "alarmtimer",
 		.pm = &alarmtimer_pm_ops,
-	}
+	},
+	.shutdown = alarm_shutdown,
+//lenovo sw yexh1 add for power-off alarm, end
+
 };
 
 /**

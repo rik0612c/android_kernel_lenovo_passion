@@ -394,6 +394,43 @@ enum android_device_state {
 	USB_RESUMED
 };
 
+//lenovo sw yexh1, add for usb uevent state report
+extern int is_charger_plug_in(void);
+void popup_usb_select_window(struct android_dev *dev , enum android_device_state state);
+void popup_usb_select_window(struct android_dev *dev , enum android_device_state state){
+
+	char *appear[2]    = { "USB_STATE=AVAILABLE", NULL };
+	char *disappear[2]   = { "USB_STATE=UNAVAILABLE", NULL };
+	char **uevent_envp = NULL;
+	static int old_state = 0;
+   	int new_state = 0;
+
+	if (state == USB_CONFIGURED) {
+		new_state = 1;
+	}
+
+	if(is_charger_plug_in() == 0)
+		new_state = 2;
+
+	pr_info("state: old is %d,  new is %d \n",old_state,new_state);
+
+	if((old_state == new_state) || (new_state == 0))
+		return;
+	else
+		old_state = new_state;
+
+	if(new_state == 1)
+		uevent_envp = appear;
+	else if(new_state == 2)
+		uevent_envp = disappear;
+
+	if(uevent_envp){
+		kobject_uevent_env(&dev->dev->kobj, KOBJ_CHANGE, uevent_envp);
+		pr_info("sent uevent %s\n", uevent_envp[0]);
+	}
+}
+//lenovo sw yexh1, end
+
 static void android_work(struct work_struct *data)
 {
 	struct android_dev *dev = container_of(data, struct android_dev, work);
@@ -429,6 +466,10 @@ static void android_work(struct work_struct *data)
 	dev->sw_connected = dev->connected;
 	dev->sw_suspended = dev->suspended;
 	spin_unlock_irqrestore(&cdev->lock, flags);
+
+//lenovo sw yexh1, add for usb uevent state report 
+	popup_usb_select_window(dev , next_state);
+//lenovo sw yexh1, add end
 
 	if (pdata->pm_qos_latency[0] && pm_qos_vote == 1) {
 		cancel_delayed_work_sync(&dev->pm_qos_work);
@@ -473,7 +514,7 @@ static void android_work(struct work_struct *data)
 		}
 		pr_info("%s: sent uevent %s\n", __func__, uevent_envp[0]);
 	} else {
-		pr_info("%s: did not send uevent (%d %d %pK)\n", __func__,
+		pr_info("%s: did not send uevent (%d %d %p)\n", __func__,
 			 dev->connected, dev->sw_connected, cdev->config);
 	}
 }
@@ -1911,10 +1952,25 @@ static void mtp_function_cleanup(struct android_usb_function *f)
 	mtp_cleanup();
 }
 
+//lenovo sw, yexh1 add for mtp with Microsoft OS Descriptor
+int mtp_functions_no;
+//lenovo sw, yexh1 add end
+
 static int
 mtp_function_bind_config(struct android_usb_function *f,
 		struct usb_configuration *c)
 {
+
+//lenovo sw, yexh1 add for mtp with Microsoft OS Descriptor
+	struct android_usb_function_holder *f_holder;
+	struct android_configuration *conf =
+		container_of(c, struct android_configuration, usb_config);
+	mtp_functions_no = 0;
+	list_for_each_entry(f_holder, &conf->enabled_functions, enabled_list) {
+		mtp_functions_no++;
+	}
+//lenovo sw, yexh1 add end
+
 	return mtp_bind_config(c, false);
 }
 
@@ -2427,6 +2483,14 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	snprintf(name[0], MAX_LUN_NAME, "lun");
 	config->fsg.luns[0].removable = 1;
 
+//lenovo sw, yexh1 add for usb cdrom
+	snprintf(name[0], MAX_LUN_NAME, "lun_cd");
+	config->fsg.luns[0].removable = 0;
+	config->fsg.luns[0].cdrom = 1;
+	config->fsg.luns[0].ro = 1;
+	uicc_nluns = 0; //we are not use qrd solution
+//lenovo sw yexh1 end	
+
 	if (dev->pdata && dev->pdata->cdrom) {
 		config->fsg.luns[config->fsg.nluns].cdrom = 1;
 		config->fsg.luns[config->fsg.nluns].ro = 1;
@@ -2565,7 +2629,7 @@ static void mass_storage_function_enable(struct android_usb_function *f)
 
 	pr_debug("fsg.nluns:%d\n", config->fsg.nluns);
 	for (i = prev_nluns; i < config->fsg.nluns; i++) {
-		snprintf(lun_name, sizeof(buf1), "lun%d", (i-prev_nluns));
+		snprintf(lun_name, sizeof(buf), "lun%d", (i-prev_nluns));
 		pr_debug("sysfs: LUN name:%s\n", lun_name);
 		err = sysfs_create_link(&f->dev->kobj,
 			&common->luns[i].dev.kobj, lun_name);
@@ -3181,6 +3245,10 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 	strlcpy(buf, buff, sizeof(buf));
 	b = strim(buf);
 
+//lenovo sw yexh1 add for print usb composite setting
+       pr_info("usb: %s\n", buff);
+//lenovo sw yexh1 add end
+
 	dev->cdev->gadget->streaming_enabled = false;
 	while (b) {
 		conf_str = strsep(&b, ":");
@@ -3283,6 +3351,11 @@ static ssize_t enable_store(struct device *pdev, struct device_attribute *attr,
 		cdev->desc.bDeviceClass = device_desc.bDeviceClass;
 		cdev->desc.bDeviceSubClass = device_desc.bDeviceSubClass;
 		cdev->desc.bDeviceProtocol = device_desc.bDeviceProtocol;
+
+             //lenovo sw yexh1, add for usb driver do not need setup everytime with different phones in testmode  
+		if ( device_desc.idVendor==(__constant_cpu_to_le16(0x05c6)) && device_desc.idProduct==(__constant_cpu_to_le16(0x1)))	 
+			cdev->desc.iSerialNumber = 0;
+	     //lenovo sw yexh1, end 
 
 		/* Audio dock accessory is unable to enumerate device if
 		 * pull-up is enabled immediately. The enumeration is
@@ -3807,7 +3880,7 @@ static int usb_diag_update_pid_and_serial_num(u32 pid, const char *snum)
 		return -ENODEV;
 	}
 
-	pr_debug("%s: dload:%pK pid:%x serial_num:%s\n",
+	pr_debug("%s: dload:%p pid:%x serial_num:%s\n",
 				__func__, diag_dload, pid, snum);
 
 	/* update pid */

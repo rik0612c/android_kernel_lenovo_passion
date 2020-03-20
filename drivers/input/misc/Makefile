@@ -79,8 +79,7 @@ obj-$(CONFIG_SENSORS_BMA2X2)	+= bstclass.o
 
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bma2x2.o
 obj-$(CONFIG_SENSORS_LTR553)	+= ltr553.o
-obj-$(CONFIG_SENSORS_APDS9921)	+= apds9921.o
-obj-$(CONFIG_BTP_FPC1140)	+= fpc1020_tee_legacy.o
+obj-$(CONFIG_SENSORS_ELAN_EPL2182)      += elan_epl2182.o
 
 ifeq ($(CONFIG_SENSORS_BMA2X2_ENABLE_INT1),y)
 	EXTRA_CFLAGS += -DBMA2X2_ENABLE_INT1
@@ -106,3 +105,13 @@ obj-$(CONFIG_SENSORS_BMI160_I2C) += bmi160_i2c.o
 ifeq ($(CONFIG_SENSORS_BMI160_I2C),y)
 	EXTRA_CFLAGS += -DBMI_USE_BASIC_I2C_FUNC
 endif
+
+#lenovo-sw caoyi1 add for sensor 20151207 begin
+obj-$(CONFIG_SENSORS_LTR559_LENOVO)	+= ltr559_lenovo.o
+obj-$(CONFIG_INPUT_KIONIX_ACCEL_LENOVO)	+= kionix_accel_lenovo.o
+obj-$(CONFIG_SENSORS_AKM09911_LENOVO)	+= akm09911_lenovo.o
+#lenovo-sw caoyi1 add for sensor 20151207 end
+
+#lenovo-sw chenzz3 add for fingerprint begin
+obj-$(CONFIG_FINGERPRINT_IN_QSEE) += vfsSpiDrv.o
+#lenovo-sw chenzz3 add for fingerprint end

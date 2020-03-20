@@ -2,7 +2,7 @@
 # MSM camera configuration
 #
 
-comment "Qualcomm MSM Camera And Video"
+comment "Qualcomm && Lenovo MSM Camera And Video"
 
 menuconfig MSM_CAMERA
 	bool "Qualcomm MSM camera and video capture support"
@@ -33,29 +33,42 @@ config MSMB_CAMERA_DEBUG
 	---help---
 	  Enable printk() debug for msm camera 2.0
 
-choice
-	prompt "Camera stack variant"
-	depends on MSMB_CAMERA && MACH_OPPO
-	default MSMB_CAMERA_DEFAULT
+menuconfig LENOVO_CAMERA
+	bool "Lenovo MSM camera and video capture support"
+	depends on ARCH_MSM && VIDEO_V4L2 && I2C
+	help
+	  Say Y here to enable selecting the video adapters for
+	  Lenovo msm camera and video encoding
 
-config MSMB_CAMERA_DEFAULT
-	bool "Default Qualcomm camera stack"
+config LENOVO_CAMERA_DEBUG
+	bool "Lenovo MSM camera debugging with printk"
+	depends on LENOVO_CAMERA
+	default n
+	help
+	  Enable printk() debug for msm camera
 
-config OPPO_CAMERA_51
-	bool "OPPO's 5.1 variant of the camera stack"
+menuconfig LENOVOB_CAMERA
+	bool "Lenovo MSM camera and video capture 2.0 support"
+	depends on ARCH_MSM && VIDEO_V4L2 && I2C
 	---help---
-	  Enable the old 5.1 OPPO camera code
+	  Say Y here to enable selecting the video adapters for
+	  Lenovo msm camera and video capture 2.0, enabling this
+	  adds support for the camera driver stack including sensor, isp
+	  and postprocessing drivers.
 
-endchoice
+config LENOVOB_CAMERA_DEBUG
+	bool "Lenovo MSM camera 2.0 debugging with printk"
+	depends on LENOVOB_CAMERA
+	---help---
+	  Enable printk() debug for msm camera 2.0
 
 if MSMB_CAMERA
-if MSMB_CAMERA_DEFAULT
 source "drivers/media/platform/msm/camera_v2/Kconfig"
-endif
-if OPPO_CAMERA_51
-source "drivers/media/platform/msm/camera_v2_oppo_51/Kconfig"
-endif
 endif # MSMB_CAMERA
+
+if LENOVOB_CAMERA
+source "drivers/media/platform/msm/camera-lenovo/camera-driver/Kconfig"
+endif # LENOVOB_CAMERA
 
 source "drivers/media/platform/msm/vidc/Kconfig"
 source "drivers/media/platform/msm/wfd/Kconfig"

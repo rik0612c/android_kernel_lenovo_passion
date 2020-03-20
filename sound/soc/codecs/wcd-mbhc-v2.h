@@ -233,30 +233,22 @@ struct wcd_mbhc_moisture_cfg {
 	enum mbhc_hs_pullup_iref m_iref_ctl;
 };
 
+/* lenovo-sw zhangrc2 open l17 2015-04-28 */
 struct wcd_mbhc_config {
 	bool read_fw_bin;
 	void *calibration;
 	bool detect_extn_cable;
 	bool mono_stero_detection;
 	bool (*swap_gnd_mic) (struct snd_soc_codec *codec);
+	bool (*enuo_ldo_enable) (struct snd_soc_codec *codec,bool);
 	bool hs_ext_micbias;
 	bool gnd_det_en;
 	int key_code[WCD_MBHC_KEYCODE_NUM];
 	uint32_t linein_th;
 	struct wcd_mbhc_moisture_cfg moist_cfg;
 	bool insert_detect;
-#ifdef CONFIG_MACH_OPPO
-	/*xiang.fei@Multimedia, 2014/11/20, Add for no voice in calling*/
-	int spk_pa_en_state;
-	/*xiang.fei@Multimedia, 2014/11/20, Add end*/
-	/*xiang.fei@Multimedia, 2014/11/26, Add for pop noise*/
-	int gpio_spk_pa_en;
-	/*xiang.fei@Multimedia, 2014/11/26, Add for pop noise end*/
-	//John.Xu@PhoneSw.AudioDriver, 2015/01/09, Add for yda145 boost
-	int gpio_yda145_boost_en;
-#endif
 };
-
+/* lenovo-sw zhangrc2 open l17 2015-04-28 */
 struct wcd_mbhc_intr {
 	int mbhc_sw_intr;
 	int mbhc_btn_press_intr;

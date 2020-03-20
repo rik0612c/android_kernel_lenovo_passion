@@ -32,10 +32,6 @@
 #include <soc/qcom/restart.h>
 #include <soc/qcom/watchdog.h>
 
-#ifdef CONFIG_MACH_OPPO
-#include <soc/oppo/oppo_project.h>
-#endif
-
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
 #define EMERGENCY_DLOAD_MAGIC3    0x77777777
@@ -47,11 +43,6 @@
 #define SCM_EDLOAD_MODE			0X01
 #define SCM_DLOAD_CMD			0x10
 
-#ifdef CONFIG_MACH_OPPO
-#define RTC_BOOT_MODE		0x88F
-#define RTC_FASTBOOT_MODE	0x01
-#define RTC_RECOVERY_MODE	0x02
-#endif
 
 static int restart_mode;
 void *restart_reason;
@@ -240,20 +231,38 @@ static void msm_restart_prepare(const char *cmd)
 		/* Set warm reset as true when device is in dload mode
 		 *  or device doesn't boot up into recovery, bootloader or rtc.
 		 */
+		 /*lenovo-sw jixj2015.3.13 modify begin*/
+		#if 0
 		if (get_dload_mode() ||
 			((cmd != NULL && cmd[0] != '\0') &&
 			strcmp(cmd, "recovery") &&
 			strcmp(cmd, "bootloader") &&
 			strcmp(cmd, "rtc")))
+		#else
+		if (get_dload_mode() ||
+			((cmd != NULL && cmd[0] != '\0') &&
+			strcmp(cmd, "recovery") &&
+			strcmp(cmd, "bootloader") &&
+			strcmp(cmd, "testmode") &&
+			strcmp(cmd, "dloadmode") &&
+			strcmp(cmd, "rtc")))
+		#endif
+		 /*lenovo-sw jixj2015.3.13 modify end*/
 			need_warm_reset = true;
 	} else {
 		need_warm_reset = (get_dload_mode() ||
 				(cmd != NULL && cmd[0] != '\0'));
 	}
 
-#ifdef CONFIG_MSM_PRESERVE_MEM
-	need_warm_reset = true;
-#endif
+    /*lenovo-sw jixj2015.3.13 add begin, shutdown menu is reboot(GlobalActions)*/
+    if ((cmd != NULL && cmd[0] != '\0') &&
+        !strcmp(cmd, "GlobalActions")) {
+        need_warm_reset = false;
+    } else if(in_panic) {
+        need_warm_reset = true;
+    }
+    pr_crit("msm_restart_prepare need_warm_reset=%d\n",need_warm_reset);
+    /*lenovo-sw jixj2015.3.13 add begin*/
 
 	/* Hard reset the PMIC unless memory contents must be maintained. */
 	if (need_warm_reset) {
@@ -264,30 +273,17 @@ static void msm_restart_prepare(const char *cmd)
 
 	if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
-				qpnp_pon_set_restart_reason(
-					PON_RESTART_REASON_BOOTLOADER);
-#ifdef CONFIG_MACH_OPPO
-				if (is_project(OPPO_15011))
-					qpnp_silence_write(RTC_BOOT_MODE,
-							   RTC_FASTBOOT_MODE);
-				else
-#endif
-				__raw_writel(0x77665500, restart_reason);
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_BOOTLOADER);
+			__raw_writel(0x77665500, restart_reason);
 		} else if (!strncmp(cmd, "recovery", 8)) {
-				qpnp_pon_set_restart_reason(
-					PON_RESTART_REASON_RECOVERY);
-#ifdef CONFIG_MACH_OPPO
-				if (is_project(OPPO_15011))
-					qpnp_silence_write(RTC_BOOT_MODE,
-							   RTC_RECOVERY_MODE);
-				else
-#endif
-				__raw_writel(0x77665502, restart_reason);
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_RECOVERY);
+			__raw_writel(0x77665502, restart_reason);
 		} else if (!strcmp(cmd, "rtc")) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RTC);
 			__raw_writel(0x77665503, restart_reason);
-#ifndef CONFIG_MACH_OPPO
                 } else if (!strcmp(cmd, "dm-verity device corrupted")) {
                         qpnp_pon_set_restart_reason(
                                 PON_RESTART_REASON_DMVERITY_CORRUPTED);
@@ -300,7 +296,6 @@ static void msm_restart_prepare(const char *cmd)
                         qpnp_pon_set_restart_reason(
                                 PON_RESTART_REASON_KEYS_CLEAR);
                         __raw_writel(0x7766550a, restart_reason);
-#endif
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;
@@ -310,8 +305,13 @@ static void msm_restart_prepare(const char *cmd)
 					     restart_reason);
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
+		/*lenovo-sw jixj 2015.3.13 add begin*/
+		} else if (!strncmp(cmd, "testmode", 8)) {
+			__raw_writel(0x77665504, restart_reason);
+		} else if (!strncmp(cmd, "dloadmode", 9)) {
+			set_dload_mode(1);
+		/*lenovo-sw jixj 2015.3.13 add end*/
 		} else {
-			qpnp_pon_set_restart_reason(PON_RESTART_REASON_UNKNOWN);
 			__raw_writel(0x77665501, restart_reason);
 		}
 	}
@@ -468,10 +468,6 @@ static int msm_restart_probe(struct platform_device *pdev)
 	msm_ps_hold = devm_ioremap_resource(dev, mem);
 	if (IS_ERR(msm_ps_hold))
 		return PTR_ERR(msm_ps_hold);
-
-#ifdef CONFIG_MACH_OPPO
-	__raw_writel(0x7766550a, restart_reason);
-#endif
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	if (mem)

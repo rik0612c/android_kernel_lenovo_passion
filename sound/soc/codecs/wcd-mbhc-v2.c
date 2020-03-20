@@ -30,15 +30,6 @@
 #include <sound/jack.h>
 #include "wcd-mbhc-v2.h"
 #include "wcdcal-hwdep.h"
-#ifdef CONFIG_MACH_OPPO
-//John.Xu@PhoneSw.AudioDriver, 2015/01/08, Add for avoid system sleep when detecting
-#include <linux/wakelock.h>
-#include <soc/oppo/oppo_project.h>
-#include "wcd9xxx-mbhc.h"
-#include "msm8x16_wcd_registers.h"
-#include "msm8916-wcd-irq.h"
-#include "msm8x16-wcd.h"
-#endif
 
 #define WCD_MBHC_JACK_MASK (SND_JACK_HEADSET | SND_JACK_OC_HPHL | \
 			   SND_JACK_OC_HPHR | SND_JACK_LINEOUT | \
@@ -61,17 +52,6 @@
 
 #define WCD_MBHC_BTN_PRESS_COMPL_TIMEOUT_MS  50
 
-#ifdef CONFIG_MACH_OPPO
-//John.Xu@PhoneSw.AudioDriver, 2015/01/08, Add for avoid system sleep when detecting
-static struct wake_lock headset_detect;
-static int headset_detect_inited = 0;
-//John.Xu@PhoneSw.AudioDriver, 2015/09/08, Add for 5 seconds delay for slow insert
-unsigned long delay_correct;
-/*OPPO	2015-05-11, zhangping add for  pop noise*/
-extern int ts4621_reg_write(int on, int gain);
-/*OPPO	2015-05-11, zhangping add for  end*/
-#endif
-
 static int det_extn_cable_en;
 module_param(det_extn_cable_en, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
@@ -84,39 +64,14 @@ enum wcd_mbhc_cs_mb_en_flag {
 	WCD_MBHC_EN_NONE,
 };
 
-/*zengling.wu@EXP.BaseDrv.Audio, 2016-01-27, add */
-#ifdef CONFIG_MACH_OPPO
-static void wcd_configure_cap(struct wcd_mbhc *mbhc, bool micbias2)
-{
-	u16 micbias1;
-	struct snd_soc_codec *codec = mbhc->codec;
-
-	micbias1 = snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MICB_1_EN);
-	pr_debug("\n %s: micbias1 %x micbias2 = %d\n", __func__, micbias1,
-			micbias2);
-	if ((micbias1 & 0x80) && micbias2) {
-		if ((mbhc->micbias1_cap_mode == MICBIAS_EXT_BYP_CAP) ||
-			(mbhc->micbias2_cap_mode == MICBIAS_EXT_BYP_CAP))
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (MICBIAS_EXT_BYP_CAP << 6));
-		else
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (MICBIAS_NO_EXT_BYP_CAP << 6));
-	} else if (micbias2) {
-		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (mbhc->micbias2_cap_mode << 6));
-	} else if (micbias1 & 0x80) {
-		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (mbhc->micbias1_cap_mode << 6));
-	} else {
-		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, 0x00);
-	}
-}
+/*add by lily8@lenovo.com for autotestA start 2014-07-15*/
+#ifndef HEADSET_STANDARD_FLAG
+#define HEADSET_STANDARD_FLAG
 #endif
-/*zengling.wu@EXP.BaseDrv.Audio, 2016-01-27, add end*/
+
+#ifdef HEADSET_STANDARD_FLAG
+bool headset_headphone_flag = false; // false headphone, true headset 
+#endif
 
 static void wcd_mbhc_jack_report(struct wcd_mbhc *mbhc,
 				struct snd_soc_jack *jack, int status, int mask)
@@ -173,11 +128,6 @@ static void wcd_program_hs_vref(struct wcd_mbhc *mbhc)
 
 	dev_dbg(codec->dev, "%s: reg_val  = %x\n", __func__, reg_val);
 	WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_HS_VREF, reg_val);
-#ifdef CONFIG_MACH_OPPO
-	//Jianfeng.Qiu@Multimedia.Audio, 2015/05/26, Modify for compatible selfiestick
-	snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MBHC_BTN3_CTL,
-			0x03, 0x03);
-#endif
 }
 
 static void wcd_program_btn_threshold(const struct wcd_mbhc *mbhc, bool micbias)
@@ -214,7 +164,7 @@ static void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
 	if (mbhc->mbhc_cb->mbhc_micbias_control)
 		return;
 
-	pr_debug("%s: enter, cs_mb_en: %d\n", __func__, cs_mb_en);
+	pr_info("%s: enter, cs_mb_en: %d\n", __func__, cs_mb_en);
 
 	switch (cs_mb_en) {
 	case WCD_MBHC_EN_CS:
@@ -245,11 +195,11 @@ static void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_MICB_CTRL, 0);
 		break;
 	default:
-		pr_debug("%s: Invalid parameter", __func__);
+		pr_info("%s: Invalid parameter", __func__);
 		break;
 	}
 
-	pr_debug("%s: exit\n", __func__);
+	pr_info("%s: exit\n", __func__);
 }
 
 static const char *wcd_mbhc_get_event_string(int event)
@@ -299,7 +249,7 @@ static int wcd_event_notify(struct notifier_block *self, unsigned long val,
 	bool micbias1 = false;
 	u8 fsm_en;
 
-	pr_debug("%s: event %s (%d)\n", __func__,
+	pr_info("%s: event %s (%d)\n", __func__,
 		 wcd_mbhc_get_event_string(event), event);
 	if (mbhc->mbhc_cb->micbias_enable_status) {
 		micbias2 = mbhc->mbhc_cb->micbias_enable_status(mbhc,
@@ -311,7 +261,7 @@ static int wcd_event_notify(struct notifier_block *self, unsigned long val,
 	/* MICBIAS usage change */
 	case WCD_EVENT_POST_DAPM_MICBIAS_2_ON:
 		mbhc->is_hs_recording = true;
-		pr_debug("%s: is_capture: %d\n", __func__,
+		pr_info("%s: is_capture: %d\n", __func__,
 			  mbhc->is_hs_recording);
 		break;
 	case WCD_EVENT_POST_MICBIAS_2_ON:
@@ -368,7 +318,7 @@ out_micb_en:
 	/* MICBIAS usage change */
 	case WCD_EVENT_POST_DAPM_MICBIAS_2_OFF:
 		mbhc->is_hs_recording = false;
-		pr_debug("%s: is_capture: %d\n", __func__,
+		pr_info("%s: is_capture: %d\n", __func__,
 			  mbhc->is_hs_recording);
 		break;
 	case WCD_EVENT_POST_MICBIAS_2_OFF:
@@ -483,7 +433,7 @@ static bool wcd_swch_level_remove(struct wcd_mbhc *mbhc)
 static void wcd_schedule_hs_detect_plug(struct wcd_mbhc *mbhc,
 					    struct work_struct *work)
 {
-	pr_debug("%s: scheduling correct_swch_plug\n", __func__);
+	pr_info("%s: scheduling correct_swch_plug\n", __func__);
 	WCD_MBHC_RSC_ASSERT_LOCKED(mbhc);
 	mbhc->hs_detect_work_stop = false;
 	mbhc->mbhc_cb->lock_sleep(mbhc, true);
@@ -494,11 +444,11 @@ static void wcd_schedule_hs_detect_plug(struct wcd_mbhc *mbhc,
 static void wcd_cancel_hs_detect_plug(struct wcd_mbhc *mbhc,
 					 struct work_struct *work)
 {
-	pr_debug("%s: Canceling correct_plug_swch\n", __func__);
+	pr_info("%s: Canceling correct_plug_swch\n", __func__);
 	mbhc->hs_detect_work_stop = true;
 	WCD_MBHC_RSC_UNLOCK(mbhc);
 	if (cancel_work_sync(work)) {
-		pr_debug("%s: correct_plug_swch is canceled\n",
+		pr_info("%s: correct_plug_swch is canceled\n",
 			 __func__);
 		mbhc->mbhc_cb->lock_sleep(mbhc, false);
 	}
@@ -516,7 +466,7 @@ static void wcd_mbhc_clr_and_turnon_hph_padac(struct wcd_mbhc *mbhc)
 	mutex_lock(&mbhc->hphr_pa_lock);
 	if (test_and_clear_bit(WCD_MBHC_HPHR_PA_OFF_ACK,
 			       &mbhc->hph_pa_dac_state)) {
-		pr_debug("%s: HPHR clear flag and enable PA\n", __func__);
+		pr_info("%s: HPHR clear flag and enable PA\n", __func__);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_HPHR_PA_EN, 1);
 		pa_turned_on = true;
 	}
@@ -524,14 +474,14 @@ static void wcd_mbhc_clr_and_turnon_hph_padac(struct wcd_mbhc *mbhc)
 	mutex_lock(&mbhc->hphl_pa_lock);
 	if (test_and_clear_bit(WCD_MBHC_HPHL_PA_OFF_ACK,
 			       &mbhc->hph_pa_dac_state)) {
-		pr_debug("%s: HPHL clear flag and enable PA\n", __func__);
+		pr_info("%s: HPHL clear flag and enable PA\n", __func__);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_HPHL_PA_EN, 1);
 		pa_turned_on = true;
 	}
 	mutex_unlock(&mbhc->hphl_pa_lock);
 
 	if (pa_turned_on) {
-		pr_debug("%s: PA was turned on by MBHC and not by DAPM\n",
+		pr_info("%s: PA was turned on by MBHC and not by DAPM\n",
 			 __func__);
 		usleep_range(wg_time * 1000, wg_time * 1000 + 50);
 	}
@@ -549,11 +499,6 @@ static bool wcd_mbhc_is_hph_pa_on(struct wcd_mbhc *mbhc)
 static void wcd_mbhc_set_and_turnoff_hph_padac(struct wcd_mbhc *mbhc)
 {
 	u8 wg_time;
-#ifdef CONFIG_MACH_OPPO
-	/*zengling.wu@EXP.BaseDrv.Audio, 2016-01-27, add */
-	struct snd_soc_codec *codec = mbhc->codec;
-	/*zengling.wu@EXP.BaseDrv.Audio, 2016-01-27, add end*/
-#endif
 
 	WCD_MBHC_REG_READ(WCD_MBHC_HPH_CNP_WG_TIME, wg_time);
 	wg_time += 1;
@@ -561,82 +506,42 @@ static void wcd_mbhc_set_and_turnoff_hph_padac(struct wcd_mbhc *mbhc)
 	/* If headphone PA is on, check if userspace receives
 	* removal event to sync-up PA's state */
 	if (wcd_mbhc_is_hph_pa_on(mbhc)) {
-		pr_debug("%s PA is on, setting PA_OFF_ACK\n", __func__);
+		pr_info("%s PA is on, setting PA_OFF_ACK\n", __func__);
 		set_bit(WCD_MBHC_HPHL_PA_OFF_ACK, &mbhc->hph_pa_dac_state);
 		set_bit(WCD_MBHC_HPHR_PA_OFF_ACK, &mbhc->hph_pa_dac_state);
 	} else {
-		pr_debug("%s PA is off\n", __func__);
+		pr_info("%s PA is off\n", __func__);
 	}
 	WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_HPH_PA_EN, 0);
-
-#ifdef CONFIG_MACH_OPPO
-	/*xiang.fei@Multimedia, 2014/11/20, Add for no voice in calling*/
-	if (is_project(OPPO_15109)) {
-		pr_debug("%s mbhc->mbhc_cfg->spk_pa_en_state=%d\n", __func__,
-				mbhc->mbhc_cfg->spk_pa_en_state);
-		if (mbhc->mbhc_cfg->spk_pa_en_state)
-			snd_soc_update_bits(codec,
-					MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN,
-					0x10, 0x00);
-		else
-			snd_soc_update_bits(codec,
-					MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN,
-					0x30, 0x00);
-	} else
-		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN,
-				0x30, 0x00);
-	/*xiang.fei@Multimedia, 2014/11/20, Add end*/
-#endif
-
 	usleep_range(wg_time * 1000, wg_time * 1000 + 50);
 }
-
+ /* lenovo-sw zhangrc2   support selfie stick 2016-2-2 */
 int wcd_mbhc_get_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 			uint32_t *zr)
 {
 	*zl = mbhc->zl;
 	*zr = mbhc->zr;
 
-	if (*zl && *zr)
-		return 0;
+
+	pr_info("%s: headset zl %d zr %d\n",
+		 __func__, *zl, *zr);
+
+	if (*zl && *zr){
+               if (*zl > 10000 && *zr > 10000)
+                       return 1;
+               else
+		            return 0;
+	}	
 	else
 		return -EINVAL;
 }
-
-#ifdef CONFIG_MACH_OPPO
-/*OPPO	2015-10-15, yuanyan add to support ICBC bank USB key start */
-static void enable_micbias_and_source(struct wcd_mbhc *mbhc, int plug_type)
-{
-	int micbias2 = 0;
-	struct snd_soc_codec *codec = mbhc->codec;
-
-	micbias2 = (snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MICB_2_EN) & 0x80);
-	pr_debug("%s: plug_type:%d micbias2:%d\n", __func__, plug_type,
-			micbias2);
-	if (plug_type == MBHC_PLUG_TYPE_NONE ||
-			plug_type == MBHC_PLUG_TYPE_HEADPHONE) {
-		if (micbias2 != 0)
-			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_NONE);
-		if (mbhc->mbhc_cb && mbhc->mbhc_cb->enable_mb_source)
-			mbhc->mbhc_cb->enable_mb_source(codec, false);
-	}
-
-	if (plug_type == MBHC_PLUG_TYPE_HEADSET) {
-		if (micbias2 == 0)
-			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
-		if (mbhc->mbhc_cb && mbhc->mbhc_cb->enable_mb_source)
-			mbhc->mbhc_cb->enable_mb_source(codec, true);
-	}
-}
-/*OPPO	2015-10-15, yuanyan add to support ICBC bank USB key end */
-#endif
-
+ /* lenovo-sw zhangrc2   support selfie stick 2016-2-2 */
 static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 				enum snd_jack_types jack_type)
 {
 	WCD_MBHC_RSC_ASSERT_LOCKED(mbhc);
 
-	pr_debug("%s: enter insertion %d hph_status %x\n",
+	pr_info("%s: enter insertion %d hph_status %x\n",
 		 __func__, insertion, mbhc->hph_status);
 	if (!insertion) {
 		/* Report removal */
@@ -646,23 +551,12 @@ static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 		 * report release if we reported button press
 		 */
 		if (wcd_cancel_btn_work(mbhc)) {
-			pr_debug("%s: button press is canceled\n", __func__);
+			pr_info("%s: button press is canceled\n", __func__);
 		} else if (mbhc->buttons_pressed) {
-#ifndef CONFIG_MACH_OPPO
-			pr_debug("%s: release of button press%d\n",
+			pr_info("%s: release of button press%d\n",
 				 __func__, jack_type);
 			wcd_mbhc_jack_report(mbhc, &mbhc->button_jack, 0,
 					    mbhc->buttons_pressed);
-#else
-			/*OPPO 2014-10-10 zhzhyon Delete for headset detect*/
-			if (mbhc->buttons_pressed & SND_JACK_BTN_4) {
-				pr_err("%s: release of button press%d\n",
-					__func__, jack_type);
-				wcd_mbhc_jack_report(mbhc, &mbhc->button_jack,
-					    0, mbhc->buttons_pressed);
-			}
-			/*OPPO 2014-10-10 zhzhyon Delete end*/
-#endif
 			mbhc->buttons_pressed &=
 				~WCD_MBHC_JACK_BUTTON_MASK;
 		}
@@ -685,7 +579,7 @@ static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 
 		mbhc->hph_type = WCD_MBHC_HPH_NONE;
 		mbhc->zl = mbhc->zr = 0;
-		pr_debug("%s: Reporting removal %d(%x)\n", __func__,
+		pr_info("%s: Reporting removal %d(%x)\n", __func__,
 			 jack_type, mbhc->hph_status);
 		wcd_mbhc_jack_report(mbhc, &mbhc->headset_jack,
 				mbhc->hph_status, WCD_MBHC_JACK_MASK);
@@ -693,20 +587,6 @@ static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 		hphrocp_off_report(mbhc, SND_JACK_OC_HPHR);
 		hphlocp_off_report(mbhc, SND_JACK_OC_HPHL);
 		mbhc->current_plug = MBHC_PLUG_TYPE_NONE;
-#ifdef CONFIG_MACH_OPPO
-		/*OPPO	2015-05-08, zhangping add for  pop noise*/
-		if (is_project(OPPO_15109)) {
-			if (((test_bit(WCD_MBHC_EVENT_PA_HPHL,
-					&mbhc->event_state)) ||
-					(test_bit(WCD_MBHC_EVENT_PA_HPHR,
-					&mbhc->event_state))) &&
-					wcd_swch_level_remove(mbhc)) {
-				wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_CS);
-				ts4621_reg_write(0x02, 0xc0);
-			}
-		}
-		/*OPPO 2015-05-08 zhangping add end*/
-#endif
 	} else {
 		/*
 		 * Report removal of current jack type.
@@ -737,17 +617,17 @@ static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 			}
 			mbhc->hph_type = WCD_MBHC_HPH_NONE;
 			mbhc->zl = mbhc->zr = 0;
-			pr_debug("%s: Reporting removal (%x)\n",
+			pr_info("%s: Reporting removal (%x)\n",
 				 __func__, mbhc->hph_status);
 			wcd_mbhc_jack_report(mbhc, &mbhc->headset_jack,
 					    0, WCD_MBHC_JACK_MASK);
 
 			if (mbhc->hph_status == SND_JACK_LINEOUT) {
 
-				pr_debug("%s: Enable micbias\n", __func__);
+				pr_info("%s: Enable micbias\n", __func__);
 				/* Disable current source and enable micbias */
 				wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
-				pr_debug("%s: set up elec removal detection\n",
+				pr_info("%s: set up elec removal detection\n",
 					  __func__);
 				WCD_MBHC_REG_UPDATE_BITS(
 						WCD_MBHC_ELECT_DETECTION_TYPE,
@@ -799,44 +679,33 @@ static void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 							mbhc->hph_status,
 							WCD_MBHC_JACK_MASK);
 				}
-				pr_debug("%s: Marking jack type as SND_JACK_LINEOUT\n",
+				pr_info("%s: Marking jack type as SND_JACK_LINEOUT\n",
 				__func__);
 			}
 		}
 
 		mbhc->hph_status |= jack_type;
 
-		pr_debug("%s: Reporting insertion %d(%x)\n", __func__,
+		pr_info("%s: Reporting insertion %d(%x)\n", __func__,
 			 jack_type, mbhc->hph_status);
 		wcd_mbhc_jack_report(mbhc, &mbhc->headset_jack,
 				    (mbhc->hph_status | SND_JACK_MECHANICAL),
 				    WCD_MBHC_JACK_MASK);
 		wcd_mbhc_clr_and_turnon_hph_padac(mbhc);
 	}
-#ifdef CONFIG_MACH_OPPO
-	/*OPPO	2015-10-15, yuanyan add to support ICBC bank USB key start */
-	if (is_project(OPPO_15022))
-		enable_micbias_and_source(mbhc,mbhc->current_plug);
-	/*OPPO	2015-10-15, yuanyan add to support ICBC bank USB key end */
-#endif
-	pr_debug("%s: leave hph_status %x\n", __func__, mbhc->hph_status);
+	pr_info("%s: leave hph_status %x\n", __func__, mbhc->hph_status);
 }
 
 static void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
 					 enum wcd_mbhc_plug_type plug_type)
 {
-	pr_debug("%s: enter current_plug(%d) new_plug(%d)\n",
+	pr_info("%s: enter current_plug(%d) new_plug(%d)\n",
 		 __func__, mbhc->current_plug, plug_type);
 
 	WCD_MBHC_RSC_ASSERT_LOCKED(mbhc);
-#ifdef CONFIG_MACH_OPPO
-	/*OPPO 2014-09-09 zhzhyon Add for headset detect*/
-	if (plug_type == MBHC_PLUG_TYPE_GND_MIC_SWAP)
-		plug_type = MBHC_PLUG_TYPE_HEADSET;
-	/*OPPO 2014-09-09 zhzhyon Add end*/
-#endif
+
 	if (mbhc->current_plug == plug_type) {
-		pr_debug("%s: cable already reported, exit\n", __func__);
+		pr_info("%s: cable already reported, exit\n", __func__);
 		goto exit;
 	}
 
@@ -846,24 +715,54 @@ static void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
 		 * report a headphone or unsupported
 		 */
 		wcd_mbhc_report_plug(mbhc, 1, SND_JACK_HEADPHONE);
+		        /*add by lily8@lenovo.com for autotestA start 2014-07-15*/
+		#ifdef HEADSET_STANDARD_FLAG
+		if(headset_headphone_flag)
+			headset_headphone_flag = false;
+		pr_info("%s: headset_headphone_flag(%d)\n",
+		 __func__,headset_headphone_flag);
+		#endif
+        /*add by lily8@lenovo.com for autotestA end 2014-07-15*/
 	} else if (plug_type == MBHC_PLUG_TYPE_GND_MIC_SWAP) {
 			if (mbhc->current_plug == MBHC_PLUG_TYPE_HEADPHONE)
 				wcd_mbhc_report_plug(mbhc, 0,
 						SND_JACK_HEADPHONE);
 			if (mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET)
 				wcd_mbhc_report_plug(mbhc, 0, SND_JACK_HEADSET);
-		wcd_mbhc_report_plug(mbhc, 1, SND_JACK_UNSUPPORTED);
+ /* lenovo-sw zhangrc2   support selfie stick 2016-2-2 */			
+		        if (mbhc->impedance_detect) {
+					int impe;
+					if (mbhc->impedance_detect &&
+					mbhc->mbhc_cb->compute_impedance &&
+					(mbhc->mbhc_cfg->linein_th != 0)) 
+						mbhc->mbhc_cb->compute_impedance(mbhc,
+						&mbhc->zl, &mbhc->zr);
+						impe = wcd_mbhc_get_impedance(mbhc,   &mbhc->zl, &mbhc->zr);
+                      			 if (impe){
+                              			 wcd_mbhc_report_plug(mbhc, 1, SND_JACK_HEADSET);
+                      			 }  else {
+                               			wcd_mbhc_report_plug(mbhc, 1, SND_JACK_UNSUPPORTED);
+                       			}							   
+			}
+ /* lenovo-sw zhangrc2   support selfie stick 2016-2-2 */		
 	} else if (plug_type == MBHC_PLUG_TYPE_HEADSET) {
 		/*
 		 * If Headphone was reported previously, this will
 		 * only report the mic line
 		 */
 		wcd_mbhc_report_plug(mbhc, 1, SND_JACK_HEADSET);
+		/*add by lily8@lenovo.com for autotestA start 2014-07-15*/
+		#ifdef HEADSET_STANDARD_FLAG
+		headset_headphone_flag = true;
+		pr_info("%s: headset_headphone_flag(%d)\n",
+		 __func__,headset_headphone_flag);
+		#endif
+              /*add by lily8@lenovo.com for autotestA end 2014-07-15*/
 	} else if (plug_type == MBHC_PLUG_TYPE_HIGH_HPH) {
 		if (mbhc->mbhc_cfg->detect_extn_cable) {
 			/* High impedance device found. Report as LINEOUT */
 			wcd_mbhc_report_plug(mbhc, 1, SND_JACK_LINEOUT);
-			pr_debug("%s: setup mic trigger for further detection\n",
+			pr_info("%s: setup mic trigger for further detection\n",
 				 __func__);
 
 			/* Disable HW FSM and current source */
@@ -889,11 +788,9 @@ static void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
 		     mbhc->current_plug, plug_type);
 	}
 exit:
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 }
 
-#ifndef CONFIG_MACH_OPPO
-/*OPPO 2014-09-10 zhzhyon Delete for headset detect*/
 /* To determine if cross connection occured */
 static int wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 {
@@ -903,7 +800,7 @@ static int wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 	bool hphl_sch_res, hphr_sch_res;
 
 	if (wcd_swch_level_remove(mbhc)) {
-		pr_debug("%s: Switch level is low\n", __func__);
+		pr_info("%s: Switch level is low\n", __func__);
 		return -EINVAL;
 	}
 
@@ -920,7 +817,7 @@ static int wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 	WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_ELECT_SCHMT_ISRC, 2);
 
 	WCD_MBHC_REG_READ(WCD_MBHC_ELECT_RESULT, swap_res);
-	pr_debug("%s: swap_res%x\n", __func__, swap_res);
+	pr_info("%s: swap_res%x\n", __func__, swap_res);
 
 	/*
 	 * Read reg hphl and hphr schmitt result with cross connection
@@ -931,19 +828,17 @@ static int wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 	WCD_MBHC_REG_READ(WCD_MBHC_HPHR_SCHMT_RESULT, hphr_sch_res);
 	if (!(hphl_sch_res || hphr_sch_res)) {
 		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
-		pr_debug("%s: Cross connection identified\n", __func__);
+		pr_info("%s: Cross connection identified\n", __func__);
 	} else {
-		pr_debug("%s: No Cross connection found\n", __func__);
+		pr_info("%s: No Cross connection found\n", __func__);
 	}
 
 	/* Disable schmitt trigger and restore micbias */
 	WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_ELECT_SCHMT_ISRC, reg1);
-	pr_debug("%s: leave, plug type: %d\n", __func__,  plug_type);
+	pr_info("%s: leave, plug type: %d\n", __func__,  plug_type);
 
 	return (plug_type == MBHC_PLUG_TYPE_GND_MIC_SWAP) ? true : false;
 }
-/*OPPO 2014-09-10 zhzhyon Delete end*/
-#endif
 
 static bool wcd_is_special_headset(struct wcd_mbhc *mbhc)
 {
@@ -958,7 +853,7 @@ static bool wcd_is_special_headset(struct wcd_mbhc *mbhc)
 	 */
 	if (mbhc->mbhc_cb->mbhc_micbias_control &&
 	    !mbhc->mbhc_cb->mbhc_micb_ctrl_thr_mic) {
-		pr_debug("%s: callback fn micb_ctrl_thr_mic not defined\n",
+		pr_info("%s: callback fn micb_ctrl_thr_mic not defined\n",
 			 __func__);
 		return false;
 	} else if (mbhc->mbhc_cb->mbhc_micb_ctrl_thr_mic) {
@@ -973,12 +868,12 @@ static bool wcd_is_special_headset(struct wcd_mbhc *mbhc)
 
 	wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
 
-	pr_debug("%s: special headset, start register writes\n", __func__);
+	pr_info("%s: special headset, start register writes\n", __func__);
 
 	WCD_MBHC_REG_READ(WCD_MBHC_HS_COMP_RESULT, hs_comp_res);
 	while (hs_comp_res)  {
 		if (mbhc->hs_detect_work_stop) {
-			pr_debug("%s: stop requested: %d\n", __func__,
+			pr_info("%s: stop requested: %d\n", __func__,
 					mbhc->hs_detect_work_stop);
 			break;
 		}
@@ -999,16 +894,16 @@ static bool wcd_is_special_headset(struct wcd_mbhc *mbhc)
 		msleep(50);
 		WCD_MBHC_REG_READ(WCD_MBHC_HS_COMP_RESULT, hs_comp_res);
 		if (!(hs_comp_res))
-			pr_debug("%s: Special headset detected in %d msecs\n",
+			pr_info("%s: Special headset detected in %d msecs\n",
 					__func__, (delay * 2));
 		if (delay == SPECIAL_HS_DETECT_TIME_MS) {
-			pr_debug("%s: Spl headset didnt get detect in 4 sec\n",
+			pr_info("%s: Spl headset didnt get detect in 4 sec\n",
 					__func__);
 			break;
 		}
 	}
 	if (!(hs_comp_res)) {
-		pr_debug("%s: Headset with threshold found\n",  __func__);
+		pr_info("%s: Headset with threshold found\n",  __func__);
 		mbhc->micbias_enable = true;
 		ret = true;
 	}
@@ -1026,13 +921,11 @@ static bool wcd_is_special_headset(struct wcd_mbhc *mbhc)
 		mbhc->mbhc_cb->mbhc_micb_ctrl_thr_mic(codec, MIC_BIAS_2,
 						      false);
 
-	pr_debug("%s: leave, micb_enable: %d\n", __func__,
+	pr_info("%s: leave, micb_enable: %d\n", __func__,
 		  mbhc->micbias_enable);
 	return ret;
 }
 
-#ifndef CONFIG_MACH_OPPO
-/*zengling.wu@EXP.BaseDrv.Audio, 2016-01-27, remove it,function wcd_correct_swch_plug have be remove */
 static void wcd_mbhc_update_fsm_source(struct wcd_mbhc *mbhc,
 				       enum wcd_mbhc_plug_type plug_type)
 {
@@ -1113,7 +1006,11 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	int ret = 0;
 	int rc;
 
-	pr_debug("%s: enter\n", __func__);
+        /* lenovo-sw zhangrc2  porting  8939L  change for audio */
+	int apple_detect_count =0;
+         /* lenovo-sw zhangrc2  porting  8939L  change for audio */
+
+	pr_info("%s: enter\n", __func__);
 
 	mbhc = container_of(work, struct wcd_mbhc, correct_plug_swch);
 	codec = mbhc->codec;
@@ -1147,7 +1044,7 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	WCD_MBHC_REG_READ(WCD_MBHC_HS_COMP_RESULT, hs_comp_res);
 
 	if (!rc) {
-		pr_debug("%s No btn press interrupt\n", __func__);
+		pr_info("%s No btn press interrupt\n", __func__);
 		if (!btn_result && !hs_comp_res)
 			plug_type = MBHC_PLUG_TYPE_HEADSET;
 		else if (!btn_result && hs_comp_res)
@@ -1161,11 +1058,10 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 			plug_type = MBHC_PLUG_TYPE_INVALID;
 	}
 
-	pr_debug("%s: Valid plug found, plug type is %d\n",
+	pr_info("%s: Valid plug found, plug type is %d\n",
 			 __func__, plug_type);
-	if ((plug_type == MBHC_PLUG_TYPE_HEADSET ||
-	    plug_type == MBHC_PLUG_TYPE_HEADPHONE) &&
-	    (!mbhc->btn_press_intr)) {
+	if (plug_type == MBHC_PLUG_TYPE_HEADSET ||
+	    plug_type == MBHC_PLUG_TYPE_HEADPHONE) {
 		WCD_MBHC_RSC_LOCK(mbhc);
 		wcd_mbhc_find_plug_and_report(mbhc, plug_type);
 		WCD_MBHC_RSC_UNLOCK(mbhc);
@@ -1176,7 +1072,7 @@ correct_plug_type:
 	timeout = jiffies + msecs_to_jiffies(HS_DETECT_PLUG_TIME_MS);
 	while (!time_after(jiffies, timeout)) {
 		if (mbhc->hs_detect_work_stop) {
-			pr_debug("%s: stop requested: %d\n", __func__,
+			pr_info("%s: stop requested: %d\n", __func__,
 					mbhc->hs_detect_work_stop);
 			wcd_enable_curr_micbias(mbhc,
 						WCD_MBHC_EN_NONE);
@@ -1201,7 +1097,7 @@ correct_plug_type:
 		/* allow sometime and re-check stop requested again */
 		msleep(20);
 		if (mbhc->hs_detect_work_stop) {
-			pr_debug("%s: stop requested: %d\n", __func__,
+			pr_info("%s: stop requested: %d\n", __func__,
 					mbhc->hs_detect_work_stop);
 			wcd_enable_curr_micbias(mbhc,
 						WCD_MBHC_EN_NONE);
@@ -1217,7 +1113,7 @@ correct_plug_type:
 		}
 		WCD_MBHC_REG_READ(WCD_MBHC_HS_COMP_RESULT, hs_comp_res);
 
-		pr_debug("%s: hs_comp_res: %x\n", __func__, hs_comp_res);
+		pr_info("%s: hs_comp_res: %x\n", __func__, hs_comp_res);
 		if (mbhc->mbhc_cb->hph_pa_on_status)
 			is_pa_on = mbhc->mbhc_cb->hph_pa_on_status(codec);
 
@@ -1243,7 +1139,7 @@ correct_plug_type:
 					 * This is due to GND/MIC switch didn't
 					 * work,  Report unsupported plug.
 					 */
-					pr_debug("%s: switch didnt work\n",
+					pr_info("%s: switch didnt work\n",
 						  __func__);
 					plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
 					goto report;
@@ -1269,7 +1165,7 @@ correct_plug_type:
 				 */
 				if (mbhc->mbhc_cfg->swap_gnd_mic &&
 					mbhc->mbhc_cfg->swap_gnd_mic(codec)) {
-					pr_debug("%s: US_EU gpio present,flip switch\n"
+					pr_info("%s: US_EU gpio present,flip switch\n"
 						, __func__);
 					continue;
 				}
@@ -1279,11 +1175,16 @@ correct_plug_type:
 		WCD_MBHC_REG_READ(WCD_MBHC_HPHL_SCHMT_RESULT, hphl_sch);
 		WCD_MBHC_REG_READ(WCD_MBHC_MIC_SCHMT_RESULT, mic_sch);
 		if (hs_comp_res && !(hphl_sch || mic_sch)) {
-			pr_debug("%s: cable is extension cable\n", __func__);
+			pr_info("%s: cable is extension cable\n", __func__);
 			plug_type = MBHC_PLUG_TYPE_HIGH_HPH;
 			wrk_complete = true;
+			/* lenovo-sw zhangrc2  porting  8939L  change for audio */
+			if (5 == apple_detect_count)
+				break;
+			++apple_detect_count;
+			/* lenovo-sw zhangrc2  porting  8939L  change for audio */
 		} else {
-			pr_debug("%s: cable might be headset: %d\n", __func__,
+			pr_info("%s: cable might be headset: %d\n", __func__,
 					plug_type);
 			if (!(plug_type == MBHC_PLUG_TYPE_GND_MIC_SWAP)) {
 				plug_type = MBHC_PLUG_TYPE_HEADSET;
@@ -1295,7 +1196,7 @@ correct_plug_type:
 				if (mbhc->current_plug !=
 						MBHC_PLUG_TYPE_HEADSET &&
 						!mbhc->btn_press_intr) {
-					pr_debug("%s: cable is headset\n",
+					pr_info("%s: cable is headset\n",
 							__func__);
 					goto report;
 				}
@@ -1304,7 +1205,7 @@ correct_plug_type:
 		}
 	}
 	if (!wrk_complete && mbhc->btn_press_intr) {
-		pr_debug("%s: Can be slow insertion of headphone\n", __func__);
+		pr_info("%s: Can be slow insertion of headphone\n", __func__);
 		wcd_cancel_btn_work(mbhc);
 		plug_type = MBHC_PLUG_TYPE_HEADPHONE;
 	}
@@ -1313,14 +1214,14 @@ correct_plug_type:
 	 * detect_plug-type or in above while loop, no need to report again
 	 */
 	if (!wrk_complete && plug_type == MBHC_PLUG_TYPE_HEADSET) {
-		pr_debug("%s: Headset already reported\n", __func__);
+		pr_info("%s: Headset already reported\n", __func__);
 		goto enable_supply;
 	}
 
 	if (plug_type == MBHC_PLUG_TYPE_HIGH_HPH &&
 		(!det_extn_cable_en)) {
 		if (wcd_is_special_headset(mbhc)) {
-			pr_debug("%s: Special headset found %d\n",
+			pr_info("%s: Special headset found %d\n",
 					__func__, plug_type);
 			plug_type = MBHC_PLUG_TYPE_HEADSET;
 			goto report;
@@ -1328,7 +1229,7 @@ correct_plug_type:
 	}
 
 report:
-	pr_debug("%s: Valid plug found, plug type %d wrk_cmpt %d btn_intr %d\n",
+	pr_info("%s: Valid plug found, plug type %d wrk_cmpt %d btn_intr %d\n",
 			__func__, plug_type, wrk_complete,
 			mbhc->btn_press_intr);
 	WCD_MBHC_RSC_LOCK(mbhc);
@@ -1357,282 +1258,9 @@ exit:
 		mbhc->mbhc_cb->hph_pull_down_ctrl(codec, true);
 
 	mbhc->mbhc_cb->lock_sleep(mbhc, false);
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 }
 
-#else
-
-static void wcd_correct_swch_plug(struct work_struct *work)
-{
-	struct wcd_mbhc *mbhc;
-	struct snd_soc_codec *codec;
-	enum wcd_mbhc_plug_type plug_type = MBHC_PLUG_TYPE_INVALID;
-	unsigned long timeout;
-	u16 result1, result2;
-	bool wrk_complete = false;
-	bool is_pa_on;
-	/*OPPO	2015-06-12, zhangping add for  slow insert headset*/
-	s16 reg;
-	/*OPPO	2015-06-12, zhangping add for  slow insert headset end*/
-	u16 micbias2;
-	int headphone_count = 0;
-    //John.Xu@PhoneSw.AudioDriver, 2015/06/11, Add for Qcom patch for slow insert headset
-	int headset_count = 0;
-
-	int hph_count = 0;
-
-	pr_debug("%s: enter\n", __func__);
-
-	mbhc = container_of(work, struct wcd_mbhc, correct_plug_swch);
-	codec = mbhc->codec;
-	/* Enable micbias for detection in correct work*/
-	/*OPPO	2015-05-08, zhangping add for  pop noise*/
-	if(!(is_project(OPPO_15109)))
-		wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
-	else
-	{
-	/*OPPO	2015-06-12, zhangping add for  slow insert headset*/
-	   if (mbhc->mbhc_cb && mbhc->mbhc_cb->enable_mb_source)
-		   mbhc->mbhc_cb->enable_mb_source(codec, true);
-
-	   reg = snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MBHC_FSM_CTL);
-
-	   /* Enable current source for detection in correct work*/
-	   snd_soc_update_bits(codec,MSM8X16_WCD_A_ANALOG_MBHC_FSM_CTL,0xB0, 0xB0);
-    /*OPPO	2015-06-12, zhangping add for  slow insert headset end*/
-	}
-	/*OPPO 2015-05-08 zhangping add end*/
-	timeout = jiffies + msecs_to_jiffies(HS_DETECT_PLUG_TIME_MS);
-	while (!time_after(jiffies, timeout)) {
-		if (mbhc->hs_detect_work_stop) {
-			pr_err("%s: stop requested: %d\n", __func__,
-					mbhc->hs_detect_work_stop);
-			goto exit;
-		}
-    if (is_project(OPPO_15011) || is_project(OPPO_15018) || is_project(OPPO_15022)||is_project(OPPO_15109)) {
-        //John.Xu@PhoneSw.AudioDriver, 2015/06/11, Add for Qcom patch for slow insert headset
-            if (mbhc->btn_press_intr) {
-                wcd_cancel_btn_work(mbhc);
-                mbhc->btn_press_intr = false;
-            }
-            /* Toggle FSM */
-            snd_soc_update_bits(codec,
-                    MSM8X16_WCD_A_ANALOG_MBHC_FSM_CTL,
-                    0x80, 0x00);
-            snd_soc_update_bits(codec,
-                    MSM8X16_WCD_A_ANALOG_MBHC_FSM_CTL,
-                    0x80, 0x80);
-            /* allow sometime and re-check stop requested again */
-            msleep(50);
-    } else {
-        msleep(200);
-    }
-
-
-		if (mbhc->hs_detect_work_stop)
-
-		{
-			pr_debug("%s: stop requested: %d\n", __func__,
-					mbhc->hs_detect_work_stop);
-			goto exit;
-		}
-		result1 = snd_soc_read(codec,
-				 MSM8X16_WCD_A_ANALOG_MBHC_BTN_RESULT);
-		result2 = snd_soc_read(codec,
-				MSM8X16_WCD_A_ANALOG_MBHC_ZDET_ELECT_RESULT);
-		is_pa_on = snd_soc_read(codec,
-					MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN) &
-					0x30;
-		pr_err("%s: result2 = %x is_pa_on = %d\n", __func__, result2,is_pa_on);
-
-		if ((!(result2 & 0x01)) && (!is_pa_on))
-		{
-			plug_type = MBHC_PLUG_TYPE_HEADSET;
-		}
-		if (result2 == 1)
-		{
-			pr_err("%s: cable is extension cable\n", __func__);
-			plug_type = MBHC_PLUG_TYPE_HIGH_HPH;
-			hph_count = hph_count + 1;
-			/*OPPO	2015-05-08, zhangping add for  detect start*/
-			if ((hph_count == 6) && ((is_project(OPPO_15011)) || (is_project(OPPO_15018)) || (is_project(OPPO_15022)) || (is_project(OPPO_15109))))
-			{
-				pr_err("%s:HPH will detected as headset\n",__func__);
-				plug_type = MBHC_PLUG_TYPE_HEADSET;
-				goto report;
-			}
-			/*OPPO	2015-05-08, zhangping add for  detect end*/
-
-			wrk_complete = true;
-		}
-		else
-		{
-			pr_err("%s: cable might be headset: %d\n", __func__,
-					plug_type);
-			plug_type = MBHC_PLUG_TYPE_HEADSET;
-			/*
-			 * Report headset only if not already reported
-			 * and if there is not button press without
-			 * release
-			 */
-			if (!mbhc->btn_press_intr)
-			{
-				pr_err("%s: cable is headset\n",
-						__func__);
-                //John.Xu@PhoneSw.AudioDriver, 2015/06/11, Add for for slow insert headset
-                if (is_project(OPPO_15011) || is_project(OPPO_15018) || is_project(OPPO_15022)||is_project(OPPO_15109)) {
-                    if(++headset_count == 2) {
-                         goto report;
-                    } else {
-                        continue;
-                    }
-                } else {
-                    goto report;
-                }
-            }
-			headphone_count = headphone_count + 1;
-			if(headphone_count == 4)
-			{
-				plug_type = MBHC_PLUG_TYPE_HEADPHONE;
-
-				goto report;
-			}
-			wrk_complete = false;
-		}
-
-        //John.Xu@PhoneSw.AudioDriver, 2015/06/11, Add for Qcom patch for slow insert headset
-        if (is_project(OPPO_15011) || is_project(OPPO_15018) || is_project(OPPO_15022)||is_project(OPPO_15109)) {
-        /*
-         * instead of hogging system by contineous polling, wait for
-         * sometime and re-check stop request again.
-         */
-            msleep(100);
-        }
-
-	}
-	if (mbhc->btn_press_intr)
-	{
-		pr_err("%s: Can be slow insertion of headphone\n", __func__);
-		plug_type = MBHC_PLUG_TYPE_HEADPHONE;
-	}
-
-	/*
-	 * If plug_tye is headset, we might have already reported either in
-	 * detect_plug-type or in above while loop, no need to report again
-	 */
-	if (!wrk_complete && plug_type == MBHC_PLUG_TYPE_HEADSET) {
-		pr_err("%s: It's neither headset nor headphone\n", __func__);
-		/*
-		 * Do not disable micbias if recording is going on or
-		 * headset is inserted on the other side of the extn
-		 * cable. If headset has been detected current source
-		 * needs to be kept enabled for button detection to work.
-		 * If the accessory type is invalid or unsupported, we
-		 * dont need to enable either of them.
-		 */
-		if (plug_type == MBHC_PLUG_TYPE_HEADSET) {
-			if ((mbhc->is_hs_recording || det_extn_cable_en))
-				wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
-			else if ((test_bit(WCD_MBHC_EVENT_PA_HPHL,
-				&mbhc->event_state)) ||
-				(test_bit(WCD_MBHC_EVENT_PA_HPHR,
-					  &mbhc->event_state)))
-				{
-				wcd_enable_curr_micbias(mbhc,
-						WCD_MBHC_EN_PULLUP);
-				}
-			else
-				{
-				wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_CS);
-				}
-		} else {
-			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_NONE);
-		}
-		goto exit;
-	}
-
-	if (plug_type == MBHC_PLUG_TYPE_HIGH_HPH &&
-		(!det_extn_cable_en)) {
-		if (wcd_is_special_headset(mbhc)) {
-			pr_debug("%s: Special headset found %d\n",
-					__func__, plug_type);
-			plug_type = MBHC_PLUG_TYPE_HEADSET;
-			goto report;
-		}
-	}
-
-report:
-	/*OPPO	2015-05-11, zhangping add for  pop noise*/
-	if(is_project(OPPO_15109))
-	{
-		if(((test_bit(WCD_MBHC_EVENT_PA_HPHL,&mbhc->event_state)) ||(test_bit(WCD_MBHC_EVENT_PA_HPHR,
-			&mbhc->event_state)))&& (!wcd_swch_level_remove(mbhc))&&(plug_type == MBHC_PLUG_TYPE_HEADPHONE || plug_type == MBHC_PLUG_TYPE_HEADSET))
-			ts4621_reg_write(0x02,0xc0);
-	}
-	/*OPPO	2015-05-11, zhangping add for  end*/
-	/* Write back current source value */
-	/*OPPO	2015-05-11, zhangping add for  slow insert headset*/
-	if(is_project(OPPO_15109))
-	{
-	   snd_soc_write(codec, MSM8X16_WCD_A_ANALOG_MBHC_FSM_CTL, reg);
-	}
-	/*OPPO	2015-05-11, zhangping add for  end*/
-	pr_err("%s: Valid plug found, plug type %d wrk_cmpt %d btn_intr %d\n",
-			__func__, plug_type, wrk_complete,
-			mbhc->btn_press_intr);
-	/*
-	 * Do not disable micbias if recording is going on or
-	 * headset is inserted on the other side of the extn
-	 * cable. If headset has been detected current source
-	 * needs to be kept enabled for button detection to work.
-	 * If the accessory type is invalid or unsupported, we
-	 * dont need to enable either of them.
-	 */
-	WCD_MBHC_RSC_LOCK(mbhc);
-    //John.Xu@PhoneSw.AudioDriver, 2015/09/08, Add for 5 seconds delay for slow insert
-    if(mbhc->current_plug != plug_type){
-        if(mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET && plug_type == MBHC_PLUG_TYPE_HEADPHONE){
-		/*OPPO	2015-10-16, zhangping add for  headphone detect*/
-			msleep(200);
-			if(!wcd_swch_level_remove(mbhc))
-			{
-		wcd_mbhc_report_plug(mbhc, 0, SND_JACK_HEADSET);
-			}
-        }
-		if(!wcd_swch_level_remove(mbhc))
-		{
-		wcd_mbhc_find_plug_and_report(mbhc, plug_type);
-		}
-		/*OPPO	2015-10-16, zhangping add for  headphone detect end*/
-    }
-	WCD_MBHC_RSC_UNLOCK(mbhc);
-exit:
-	micbias2 = snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MICB_2_EN);
-	wcd_configure_cap(mbhc, (micbias2 & 0x80));
-	wcd9xxx_spmi_unlock_sleep();
-	pr_err("%s: leave\n", __func__);
-	/*OPPO	2015-05-12, zhangping add for  pop noise*/
-	if(is_project(OPPO_15109))
-	{
-		if(((test_bit(WCD_MBHC_EVENT_PA_HPHL,&mbhc->event_state)) ||(test_bit(WCD_MBHC_EVENT_PA_HPHR,
-				&mbhc->event_state)))&& (!wcd_swch_level_remove(mbhc))&&(plug_type == MBHC_PLUG_TYPE_HEADPHONE || plug_type == MBHC_PLUG_TYPE_HEADSET))
-		{
-			ts4621_reg_write(0x02,0x38);
-		}
-	}
-	/*OPPO	2015-05-12, zhangping add for end*/
-    //John.Xu@PhoneSw.AudioDriver, 2015/09/08, Add for 5 seconds delay for slow insert
-    msleep(500);
-	if(!time_after(jiffies, delay_correct)){
-        pr_err("%s: before call correct_plug_swch again\n", __func__);
-        wcd_schedule_hs_detect_plug(mbhc, &mbhc->correct_plug_swch);
-	}
-}
-/*OPPO 2014-09-10 zhzhyon Modify end*/
-#endif
-
-#ifndef CONFIG_MACH_OPPO
-/*OPPO 2014-09-10 zhzhyon Modify for headset detect*/
 /* called under codec_resource_lock acquisition */
 static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
 {
@@ -1642,7 +1270,7 @@ static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
 	int cross_conn;
 	int try = 0;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	WCD_MBHC_RSC_ASSERT_LOCKED(mbhc);
 
 	if (mbhc->mbhc_cb->hph_pull_down_ctrl)
@@ -1666,127 +1294,20 @@ static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
 	} while (try < GND_MIC_SWAP_THRESHOLD);
 
 	if (cross_conn > 0) {
-		pr_debug("%s: cross con found, start polling\n",
+		pr_info("%s: cross con found, start polling\n",
 			 __func__);
 		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
 		if (!mbhc->current_plug)
 			mbhc->current_plug = plug_type;
-		pr_debug("%s: Plug found, plug type is %d\n",
+		pr_info("%s: Plug found, plug type is %d\n",
 			 __func__, plug_type);
 	}
 
 	/* Re-initialize button press completion object */
 	reinit_completion(&mbhc->btn_press_compl);
 	wcd_schedule_hs_detect_plug(mbhc, &mbhc->correct_plug_swch);
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 }
-
-#else
-
-static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
-{
-	struct snd_soc_codec *codec = mbhc->codec;
-	long timeout = msecs_to_jiffies(50);   /* 50ms */
-	enum wcd_mbhc_plug_type plug_type;
-	int timeout_result;
-	u16 result1, result2;
-
-	pr_err("%s: enter\n", __func__);
-	WCD_MBHC_RSC_ASSERT_LOCKED(mbhc);
-	wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
-	wcd_configure_cap(mbhc, true);
-	/*
-	 * Wait for 50msec for FSM to complete its task.
-	 * wakeup if btn pres intr occurs
-	 */
-	mbhc->is_btn_press = false;
-	WCD_MBHC_RSC_UNLOCK(mbhc);
-	timeout_result = wait_event_interruptible_timeout(mbhc->wait_btn_press,
-			mbhc->is_btn_press, timeout);
-
-	WCD_MBHC_RSC_LOCK(mbhc);
-	result1 = snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MBHC_BTN_RESULT);
-	result2 = snd_soc_read(codec,
-			MSM8X16_WCD_A_ANALOG_MBHC_ZDET_ELECT_RESULT);
-
-	if (!timeout_result) {
-		pr_err("%s No btn press interrupt\n", __func__);
-		/*
-		 * Check if there is any cross connection,
-		 * Micbias and schmitt trigger (HPHL-HPHR)
-		 * needs to be enabled.
-		 */
-		pr_err("%s: result1 %x, result2 %x\n", __func__,
-						result1, result2);
-
-		/* Read back result1 and result2 value again to reconfirm*/
-		result1 = snd_soc_read(codec,
-			  MSM8X16_WCD_A_ANALOG_MBHC_BTN_RESULT);
-		result2 = snd_soc_read(codec,
-			  MSM8X16_WCD_A_ANALOG_MBHC_ZDET_ELECT_RESULT);
-
-		if (!result1 && !(result2 & 0x01))
-			plug_type = MBHC_PLUG_TYPE_HEADSET;
-		else if (!result1 && (result2 & 0x01))
-			/*OPPO 2015-06-03 zhzhyon Modify for change all high hph to headset*/
-			plug_type = MBHC_PLUG_TYPE_HEADSET;
-			/*OPPO 2015-06-03 zhzhyon Modify end*/
-		else {
-			plug_type = MBHC_PLUG_TYPE_INVALID;
-			goto exit;
-		}
-	} else {
-		if (!result1 && !(result2 & 0x01))
-			plug_type = MBHC_PLUG_TYPE_HEADPHONE;
-		else {
-			plug_type = MBHC_PLUG_TYPE_INVALID;
-			goto exit;
-		}
-	}
-exit:
-	/*OPPO	2015-07-03, zhangping add for  pop noise && turn off voltage source*/
-	if(is_project(OPPO_15109))
-	{
-		snd_soc_update_bits(codec,MSM8X16_WCD_A_ANALOG_MICB_2_EN,0x80, 0x00);
-		/* Disable external voltage source to micbias if present */
-		if (mbhc->mbhc_cb && mbhc->mbhc_cb->enable_mb_source)
-			mbhc->mbhc_cb->enable_mb_source(codec, false);
-	}
-	/*OPPO 2015-07-03 zhangping add end*/
-
-	pr_err("%s: Valid plug found, plug type is %d\n",
-			 __func__, plug_type);
-//John.Xu@PhoneSw.AudioDriver, 2015/09/08, Add for 5 seconds delay for slow insert
-	delay_correct = jiffies + msecs_to_jiffies(5000);
-	if (plug_type == MBHC_PLUG_TYPE_HEADPHONE) {
-		wcd_schedule_hs_detect_plug(mbhc, &mbhc->correct_plug_swch);
-	} else if (plug_type == MBHC_PLUG_TYPE_HEADSET) {
-	/*OPPO	2015-05-11, zhangping add for  pop noise*/
-	if(is_project(OPPO_15109))
-	{
-		if(((test_bit(WCD_MBHC_EVENT_PA_HPHL,&mbhc->event_state)) ||(test_bit(WCD_MBHC_EVENT_PA_HPHR,
-			&mbhc->event_state)))&& (!wcd_swch_level_remove(mbhc)))
-			ts4621_reg_write(0x02,0xc0);
-	}
-	/*OPPO	2015-05-11, zhangping add for  end*/
-		wcd_mbhc_find_plug_and_report(mbhc, plug_type);
-	/*OPPO	2015-05-12, zhangping add for  pop noise*/
-		if(is_project(OPPO_15109))
-		{
-			if(((test_bit(WCD_MBHC_EVENT_PA_HPHL,&mbhc->event_state)) ||(test_bit(WCD_MBHC_EVENT_PA_HPHR,
-				&mbhc->event_state)))&& (!wcd_swch_level_remove(mbhc)))
-			{
-				ts4621_reg_write(0x02,0x38);
-			}
-		}
-	/*OPPO	2015-05-12, zhangping add for end*/
-	} else {
-		wcd_schedule_hs_detect_plug(mbhc, &mbhc->correct_plug_swch);
-	}
-	pr_err("%s: leave\n", __func__);
-}
-/*OPPO 2014-09-10 zhzhyon Modify end*/
-#endif
 
 static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 {
@@ -1802,7 +1323,7 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 
 	/* cancel pending button press */
 	if (wcd_cancel_btn_work(mbhc))
-		pr_debug("%s: button press is canceled\n", __func__);
+		pr_info("%s: button press is canceled\n", __func__);
 
 	WCD_MBHC_REG_READ(WCD_MBHC_MECH_DETECTION_TYPE, detection_type);
 
@@ -1817,7 +1338,7 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 	 * will not be defined.
 	 */
 
-	pr_debug("%s: mbhc->current_plug: %d detection_type: %d\n", __func__,
+	pr_info("%s: mbhc->current_plug: %d detection_type: %d\n", __func__,
 			mbhc->current_plug, detection_type);
 	wcd_cancel_hs_detect_plug(mbhc, &mbhc->correct_plug_swch);
 
@@ -1913,7 +1434,7 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 
 	mbhc->in_swch_irq_handler = false;
 	WCD_MBHC_RSC_UNLOCK(mbhc);
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 }
 
 static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
@@ -1921,16 +1442,7 @@ static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
 	int r = IRQ_HANDLED;
 	struct wcd_mbhc *mbhc = data;
 
-#ifdef CONFIG_MACH_OPPO
-	//John.Xu@PhoneSw.AudioDriver, 2015/01/08, Add for avoid system sleep when detecting
-	wake_lock(&headset_detect);
-
-	/*xiang.fei@Multimedia, 2014/08/16, Add for headset*/
-	disable_irq_nosync(irq);
-	/*xiang.fei@Multimedia, 2014/08/16, Add end*/
-#endif
-
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	if (unlikely((mbhc->mbhc_cb->lock_sleep(mbhc, true)) == false)) {
 		pr_warn("%s: failed to hold suspend\n", __func__);
 		r = IRQ_NONE;
@@ -1939,17 +1451,7 @@ static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
 		wcd_mbhc_swch_irq_handler(mbhc);
 		mbhc->mbhc_cb->lock_sleep(mbhc, false);
 	}
-
-#ifdef CONFIG_MACH_OPPO
-	/*xiang.fei@Multimedia, 2014/08/16, Add for headset*/
-	enable_irq(irq);
-	/*xiang.fei@Multimedia, 2014/08/16, Add end*/
-
-	//John.Xu@PhoneSw.AudioDriver, 2015/01/08, Add for avoid system sleep when detecting
-	wake_unlock(&headset_detect);
-#endif
-
-	pr_debug("%s: leave %d\n", __func__, r);
+	pr_info("%s: leave %d\n", __func__, r);
 	return r;
 }
 
@@ -1989,18 +1491,6 @@ static int wcd_mbhc_get_button_mask(struct wcd_mbhc *mbhc)
 		break;
 	}
 
-#ifdef CONFIG_MACH_OPPO
-	/*xiang.fei@Multimedia, 2014/09/01, Add for headset*/
-	if (btn == 15) {
-		mask = SND_JACK_BTN_4;  //John.Xu@AudioDriver 2014-03-26 add for selfiestick
-		pr_debug("%s: SND_JACK_BTN_4\n", __func__);
-	} else {
-		mask = SND_JACK_BTN_0;
-		pr_debug("%s: SND_JACK_BTN_0\n", __func__);
-	}
-	/*xiang.fei@Multimedia, 2014/09/01, Add end*/
-#endif
-
 	return mask;
 }
 
@@ -2012,16 +1502,9 @@ static irqreturn_t wcd_mbhc_hs_ins_irq(int irq, void *data)
 	static u16 hphl_trigerred;
 	static u16 mic_trigerred;
 
-	pr_debug("%s: enter\n", __func__);
-
-#ifdef CONFIG_MACH_OPPO
-	/*OPPO 2014-08-04 zhzhyon Delete headset detect*/
-	return 0;
-	/*OPPO 2014-08-04 zhzhyon Detele end*/
-#endif
-
+	pr_info("%s: enter\n", __func__);
 	if (!mbhc->mbhc_cfg->detect_extn_cable) {
-		pr_debug("%s: Returning as Extension cable feature not enabled\n",
+		pr_info("%s: Returning as Extension cable feature not enabled\n",
 			__func__);
 		return IRQ_HANDLED;
 	}
@@ -2030,7 +1513,7 @@ static irqreturn_t wcd_mbhc_hs_ins_irq(int irq, void *data)
 	WCD_MBHC_REG_READ(WCD_MBHC_ELECT_DETECTION_TYPE, detection_type);
 	WCD_MBHC_REG_READ(WCD_MBHC_ELECT_RESULT, elect_result);
 
-	pr_debug("%s: detection_type %d, elect_result %x\n", __func__,
+	pr_info("%s: detection_type %d, elect_result %x\n", __func__,
 				detection_type, elect_result);
 	if (detection_type) {
 		/* check if both Left and MIC Schmitt triggers are triggered */
@@ -2038,14 +1521,14 @@ static irqreturn_t wcd_mbhc_hs_ins_irq(int irq, void *data)
 		WCD_MBHC_REG_READ(WCD_MBHC_MIC_SCHMT_RESULT, mic_sch);
 		if (hphl_sch && mic_sch) {
 			/* Go for plug type determination */
-			pr_debug("%s: Go for plug type determination\n",
+			pr_info("%s: Go for plug type determination\n",
 				  __func__);
 			goto determine_plug;
 
 		} else {
 			if (mic_sch) {
 				mic_trigerred++;
-				pr_debug("%s: Insertion MIC trigerred %d\n",
+				pr_info("%s: Insertion MIC trigerred %d\n",
 					 __func__, mic_trigerred);
 				WCD_MBHC_REG_UPDATE_BITS(
 						WCD_MBHC_ELECT_SCHMT_ISRC,
@@ -2057,19 +1540,19 @@ static irqreturn_t wcd_mbhc_hs_ins_irq(int irq, void *data)
 			}
 			if (hphl_sch) {
 				hphl_trigerred++;
-				pr_debug("%s: Insertion HPHL trigerred %d\n",
+				pr_info("%s: Insertion HPHL trigerred %d\n",
 					 __func__, hphl_trigerred);
 			}
 			if (mic_trigerred && hphl_trigerred) {
 				/* Go for plug type determination */
-				pr_debug("%s: Go for plug type determination\n",
+				pr_info("%s: Go for plug type determination\n",
 					 __func__);
 				goto determine_plug;
 			}
 		}
 	}
 	WCD_MBHC_RSC_UNLOCK(mbhc);
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	return IRQ_HANDLED;
 
 determine_plug:
@@ -2077,7 +1560,7 @@ determine_plug:
 	 * Disable HPHL trigger and MIC Schmitt triggers.
 	 * Setup for insertion detection.
 	 */
-	pr_debug("%s: Disable insertion interrupt\n", __func__);
+	pr_info("%s: Disable insertion interrupt\n", __func__);
 	mbhc->mbhc_cb->irq_control(mbhc->codec,
 				   mbhc->intr_ids->mbhc_hs_ins_intr,
 				   false);
@@ -2090,7 +1573,7 @@ determine_plug:
 	mbhc->btn_press_intr = false;
 	wcd_mbhc_detect_plug_type(mbhc);
 	WCD_MBHC_RSC_UNLOCK(mbhc);
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	return IRQ_HANDLED;
 }
 
@@ -2104,7 +1587,7 @@ static irqreturn_t wcd_mbhc_hs_rem_irq(int irq, void *data)
 	bool removed = true;
 	int retry = 0;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 
 	WCD_MBHC_RSC_LOCK(mbhc);
 
@@ -2118,7 +1601,7 @@ static irqreturn_t wcd_mbhc_hs_rem_irq(int irq, void *data)
 		 */
 		usleep_range(10000, 10100);
 		WCD_MBHC_REG_READ(WCD_MBHC_HS_COMP_RESULT, hs_comp_result);
-		pr_debug("%s: Check result reg for fake removal: hs_comp_res %x\n",
+		pr_info("%s: Check result reg for fake removal: hs_comp_res %x\n",
 			 __func__, hs_comp_result);
 		if ((!hs_comp_result) &&
 		    retry > FAKE_REM_RETRY_ATTEMPTS) {
@@ -2127,7 +1610,7 @@ static irqreturn_t wcd_mbhc_hs_rem_irq(int irq, void *data)
 		}
 	} while (!time_after(jiffies, timeout));
 
-	pr_debug("%s: headset %s actually removed\n", __func__,
+	pr_info("%s: headset %s actually removed\n", __func__,
 		removed ? "" : "not ");
 
 	WCD_MBHC_REG_READ(WCD_MBHC_HPHL_SCHMT_RESULT, hphl_sch);
@@ -2144,12 +1627,12 @@ static irqreturn_t wcd_mbhc_hs_rem_irq(int irq, void *data)
 		} else {
 			if (!mic_sch) {
 				mic_trigerred++;
-				pr_debug("%s: Removal MIC trigerred %d\n",
+				pr_info("%s: Removal MIC trigerred %d\n",
 					 __func__, mic_trigerred);
 			}
 			if (!hphl_sch) {
 				hphl_trigerred++;
-				pr_debug("%s: Removal HPHL trigerred %d\n",
+				pr_info("%s: Removal HPHL trigerred %d\n",
 					 __func__, hphl_trigerred);
 			}
 			if (mic_trigerred && hphl_trigerred) {
@@ -2162,18 +1645,18 @@ static irqreturn_t wcd_mbhc_hs_rem_irq(int irq, void *data)
 		}
 	}
 	WCD_MBHC_RSC_UNLOCK(mbhc);
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	return IRQ_HANDLED;
 
 report_unplug:
 
 	/* cancel pending button press */
 	if (wcd_cancel_btn_work(mbhc))
-		pr_debug("%s: button press is canceled\n", __func__);
+		pr_info("%s: button press is canceled\n", __func__);
 	/* cancel correct work function */
 	wcd_cancel_hs_detect_plug(mbhc, &mbhc->correct_plug_swch);
 
-	pr_debug("%s: Report extension cable\n", __func__);
+	pr_info("%s: Report extension cable\n", __func__);
 	wcd_mbhc_report_plug(mbhc, 1, SND_JACK_LINEOUT);
 	/*
 	 * If PA is enabled HPHL schmitt trigger can
@@ -2201,7 +1684,7 @@ report_unplug:
 	hphl_trigerred = 0;
 	mic_trigerred = 0;
 	WCD_MBHC_RSC_UNLOCK(mbhc);
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	return IRQ_HANDLED;
 }
 
@@ -2211,19 +1694,19 @@ static void wcd_btn_lpress_fn(struct work_struct *work)
 	struct wcd_mbhc *mbhc;
 	s16 btn_result;
 
-	pr_debug("%s: Enter\n", __func__);
+	pr_info("%s: Enter\n", __func__);
 
 	dwork = to_delayed_work(work);
 	mbhc = container_of(dwork, struct wcd_mbhc, mbhc_btn_dwork);
 
 	WCD_MBHC_REG_READ(WCD_MBHC_BTN_RESULT, btn_result);
 	if (mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET) {
-		pr_debug("%s: Reporting long button press event, btn_result: %d\n",
+		pr_info("%s: Reporting long button press event, btn_result: %d\n",
 			 __func__, btn_result);
 		wcd_mbhc_jack_report(mbhc, &mbhc->button_jack,
 				mbhc->buttons_pressed, mbhc->buttons_pressed);
 	}
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	mbhc->mbhc_cb->lock_sleep(mbhc, false);
 }
 
@@ -2257,33 +1740,33 @@ static irqreturn_t wcd_mbhc_btn_press_handler(int irq, void *data)
 	int mask;
 	unsigned long msec_val;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	complete(&mbhc->btn_press_compl);
 	WCD_MBHC_RSC_LOCK(mbhc);
 	/* send event to sw intr handler*/
 	mbhc->is_btn_press = true;
 	wcd_cancel_btn_work(mbhc);
 	if (wcd_swch_level_remove(mbhc)) {
-		pr_debug("%s: Switch level is low ", __func__);
+		pr_info("%s: Switch level is low ", __func__);
 		goto done;
 	}
 	mbhc->btn_press_intr = true;
 
 	msec_val = jiffies_to_msecs(jiffies - mbhc->jiffies_atreport);
-	pr_debug("%s: msec_val = %ld\n", __func__, msec_val);
+	pr_info("%s: msec_val = %ld\n", __func__, msec_val);
 	if (msec_val < MBHC_BUTTON_PRESS_THRESHOLD_MIN) {
-		pr_debug("%s: Too short, ignore button press\n", __func__);
+		pr_info("%s: Too short, ignore button press\n", __func__);
 		goto done;
 	}
 
 	/* If switch interrupt already kicked in, ignore button press */
 	if (mbhc->in_swch_irq_handler) {
-		pr_debug("%s: Swtich level changed, ignore button press\n",
+		pr_info("%s: Swtich level changed, ignore button press\n",
 			 __func__);
 		goto done;
 	}
 	if (mbhc->current_plug != MBHC_PLUG_TYPE_HEADSET) {
-		pr_debug("%s: Plug isn't headset, ignore button press\n",
+		pr_info("%s: Plug isn't headset, ignore button press\n",
 				__func__);
 		goto done;
 	}
@@ -2296,7 +1779,7 @@ static irqreturn_t wcd_mbhc_btn_press_handler(int irq, void *data)
 		mbhc->mbhc_cb->lock_sleep(mbhc, false);
 	}
 done:
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	WCD_MBHC_RSC_UNLOCK(mbhc);
 	return IRQ_HANDLED;
 }
@@ -2306,17 +1789,17 @@ static irqreturn_t wcd_mbhc_release_handler(int irq, void *data)
 	struct wcd_mbhc *mbhc = data;
 	int ret;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	WCD_MBHC_RSC_LOCK(mbhc);
 	if (wcd_swch_level_remove(mbhc)) {
-		pr_debug("%s: Switch level is low ", __func__);
+		pr_info("%s: Switch level is low ", __func__);
 		goto exit;
 	}
 
 	if (mbhc->btn_press_intr) {
 		mbhc->btn_press_intr = false;
 	} else {
-		pr_debug("%s: This release is for fake btn press\n", __func__);
+		pr_info("%s: This release is for fake btn press\n", __func__);
 		goto exit;
 	}
 
@@ -2333,22 +1816,22 @@ static irqreturn_t wcd_mbhc_release_handler(int irq, void *data)
 	if (mbhc->buttons_pressed & WCD_MBHC_JACK_BUTTON_MASK) {
 		ret = wcd_cancel_btn_work(mbhc);
 		if (ret == 0) {
-			pr_debug("%s: Reporting long button release event\n",
+			pr_info("%s: Reporting long button release event\n",
 				 __func__);
 			wcd_mbhc_jack_report(mbhc, &mbhc->button_jack,
 					0, mbhc->buttons_pressed);
 		} else {
 			if (mbhc->in_swch_irq_handler) {
-				pr_debug("%s: Switch irq kicked in, ignore\n",
+				pr_info("%s: Switch irq kicked in, ignore\n",
 					__func__);
 			} else {
-				pr_debug("%s: Reporting btn press\n",
+				pr_info("%s: Reporting btn press\n",
 					 __func__);
 				wcd_mbhc_jack_report(mbhc,
 						     &mbhc->button_jack,
 						     mbhc->buttons_pressed,
 						     mbhc->buttons_pressed);
-				pr_debug("%s: Reporting btn release\n",
+				pr_info("%s: Reporting btn release\n",
 					 __func__);
 				wcd_mbhc_jack_report(mbhc,
 						&mbhc->button_jack,
@@ -2358,7 +1841,7 @@ static irqreturn_t wcd_mbhc_release_handler(int irq, void *data)
 		mbhc->buttons_pressed &= ~WCD_MBHC_JACK_BUTTON_MASK;
 	}
 exit:
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	WCD_MBHC_RSC_UNLOCK(mbhc);
 	return IRQ_HANDLED;
 }
@@ -2367,11 +1850,11 @@ static irqreturn_t wcd_mbhc_hphl_ocp_irq(int irq, void *data)
 {
 	struct wcd_mbhc *mbhc = data;
 
-	pr_debug("%s: received HPHL OCP irq\n", __func__);
+	pr_info("%s: received HPHL OCP irq\n", __func__);
 	if (mbhc) {
 		if ((mbhc->hphlocp_cnt < OCP_ATTEMPT) &&
 		    (!mbhc->hphrocp_cnt)) {
-			pr_debug("%s: retry\n", __func__);
+			pr_info("%s: retry\n", __func__);
 			mbhc->hphlocp_cnt++;
 			WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_OCP_FSM_EN, 0);
 			WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_OCP_FSM_EN, 1);
@@ -2394,10 +1877,10 @@ static irqreturn_t wcd_mbhc_hphr_ocp_irq(int irq, void *data)
 {
 	struct wcd_mbhc *mbhc = data;
 
-	pr_debug("%s: received HPHR OCP irq\n", __func__);
+	pr_info("%s: received HPHR OCP irq\n", __func__);
 	if ((mbhc->hphrocp_cnt < OCP_ATTEMPT) &&
 	    (!mbhc->hphlocp_cnt)) {
-		pr_debug("%s: retry\n", __func__);
+		pr_info("%s: retry\n", __func__);
 		mbhc->hphrocp_cnt++;
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_OCP_FSM_EN, 0);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_OCP_FSM_EN, 1);
@@ -2427,7 +1910,7 @@ static int wcd_mbhc_initialise(struct wcd_mbhc *mbhc)
 	int ret = 0;
 	struct snd_soc_codec *codec = mbhc->codec;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	WCD_MBHC_RSC_LOCK(mbhc);
 
 	/* enable HS detection */
@@ -2468,16 +1951,7 @@ static int wcd_mbhc_initialise(struct wcd_mbhc *mbhc)
 	init_completion(&mbhc->btn_press_compl);
 
 	WCD_MBHC_RSC_UNLOCK(mbhc);
-#ifdef CONFIG_MACH_OPPO
-	if (!headset_detect_inited) {
-		//John.Xu@PhoneSw.AudioDriver, 2015/01/08, Add for avoid system sleep when detecting
-		headset_detect_inited = 1;
-		wake_lock_init(&headset_detect, WAKE_LOCK_SUSPEND,
-				"headset_detect");
-	}
-	/*OPPO 2014-09-01 zhzhyon Add for avoid system sleep when detecting*/
-#endif
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 	return ret;
 }
 
@@ -2497,7 +1971,7 @@ static void wcd_mbhc_fw_read(struct work_struct *work)
 
 	while (retry < FW_READ_ATTEMPTS) {
 		retry++;
-		pr_debug("%s:Attempt %d to request MBHC firmware\n",
+		pr_info("%s:Attempt %d to request MBHC firmware\n",
 			__func__, retry);
 		if (mbhc->mbhc_cb->get_hwdep_fw_cal)
 			fw_data = mbhc->mbhc_cb->get_hwdep_fw_cal(codec,
@@ -2514,15 +1988,15 @@ static void wcd_mbhc_fw_read(struct work_struct *work)
 			usleep_range(FW_READ_TIMEOUT, FW_READ_TIMEOUT +
 					WCD_MBHC_USLEEP_RANGE_MARGIN_US);
 		} else {
-			pr_debug("%s: MBHC Firmware read succesful\n",
+			pr_info("%s: MBHC Firmware read succesful\n",
 					__func__);
 			break;
 		}
 	}
 	if (!fw_data)
-		pr_debug("%s: using request_firmware\n", __func__);
+		pr_info("%s: using request_firmware\n", __func__);
 	else
-		pr_debug("%s: using hwdep cal\n", __func__);
+		pr_info("%s: using hwdep cal\n", __func__);
 
 	if (ret != 0 && !fw_data) {
 		pr_err("%s: Cannot load MBHC firmware use default cal\n",
@@ -2614,7 +2088,7 @@ int wcd_mbhc_set_keycode(struct wcd_mbhc *mbhc)
 			input_set_capability(
 				mbhc->button_jack.jack->input_dev,
 				EV_KEY, btn_key_code[i]);
-			pr_debug("%s: set btn%d key code:%d\n", __func__,
+			pr_info("%s: set btn%d key code:%d\n", __func__,
 				i, btn_key_code[i]);
 		}
 	}
@@ -2628,7 +2102,7 @@ int wcd_mbhc_start(struct wcd_mbhc *mbhc,
 {
 	int rc = 0;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	/* update the mbhc config */
 	mbhc->mbhc_cfg = mbhc_cfg;
 
@@ -2648,14 +2122,14 @@ int wcd_mbhc_start(struct wcd_mbhc *mbhc,
 			pr_err("%s: Skipping to read mbhc fw, 0x%pK %pK\n",
 				 __func__, mbhc->mbhc_fw, mbhc->mbhc_cal);
 	}
-	pr_debug("%s: leave %d\n", __func__, rc);
+	pr_info("%s: leave %d\n", __func__, rc);
 	return rc;
 }
 EXPORT_SYMBOL(wcd_mbhc_start);
 
 void wcd_mbhc_stop(struct wcd_mbhc *mbhc)
 {
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 	if (mbhc->current_plug != MBHC_PLUG_TYPE_NONE) {
 		if (mbhc->mbhc_cb && mbhc->mbhc_cb->skip_imped_detect)
 			mbhc->mbhc_cb->skip_imped_detect(mbhc->codec);
@@ -2674,7 +2148,7 @@ void wcd_mbhc_stop(struct wcd_mbhc *mbhc)
 		mbhc->mbhc_fw = NULL;
 		mbhc->mbhc_cal = NULL;
 	}
-	pr_debug("%s: leave\n", __func__);
+	pr_info("%s: leave\n", __func__);
 }
 EXPORT_SYMBOL(wcd_mbhc_stop);
 
@@ -2696,7 +2170,7 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 	const char *hph_switch = "qcom,msm-mbhc-hphl-swh";
 	const char *gnd_switch = "qcom,msm-mbhc-gnd-swh";
 
-	pr_debug("%s: enter\n", __func__);
+	pr_info("%s: enter\n", __func__);
 
 	ret = of_property_read_u32(card->dev->of_node, hph_switch, &hph_swh);
 	if (ret) {
@@ -2773,6 +2247,26 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 			return ret;
 		}
 
+/* lenovo-sw zhangrc2 add keycode volume up and down for headset button begin */
+		ret = snd_jack_set_key(mbhc->button_jack.jack,
+				       SND_JACK_BTN_1,
+				       KEY_VOLUMEUP);
+		if (ret) {
+			pr_err("%s: Failed to set code for btn-1\n",
+				__func__);
+			return ret;
+		}
+
+		ret = snd_jack_set_key(mbhc->button_jack.jack,
+				       SND_JACK_BTN_2,
+				       KEY_VOLUMEDOWN);
+		if (ret) {
+			pr_err("%s: Failed to set code for btn-2\n",
+				__func__);
+			return ret;
+		}
+
+/* lenovo-sw zhangrc2 add keycode volume up and down for headset button end */
 		set_bit(INPUT_PROP_NO_DUMMY_RELEASE,
 			mbhc->button_jack.jack->input_dev->propbit);
 
@@ -2870,7 +2364,7 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 		goto err_hphr_ocp_irq;
 	}
 
-	pr_debug("%s: leave ret %d\n", __func__, ret);
+	pr_info("%s: leave ret %d\n", __func__, ret);
 	return ret;
 
 err_hphr_ocp_irq:
@@ -2892,7 +2386,7 @@ err_mbhc_sw_irq:
 		mbhc->mbhc_cb->register_notifier(codec, &mbhc->nblock, false);
 	mutex_destroy(&mbhc->codec_resource_lock);
 err:
-	pr_debug("%s: leave ret %d\n", __func__, ret);
+	pr_info("%s: leave ret %d\n", __func__, ret);
 	return ret;
 }
 EXPORT_SYMBOL(wcd_mbhc_init);

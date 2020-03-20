@@ -25,9 +25,6 @@
 #include <linux/bitops.h>
 #include <linux/leds.h>
 #include <linux/debugfs.h>
-#ifdef CONFIG_MACH_OPPO
-#include <soc/oppo/oppo_project.h>
-#endif
 
 #define CREATE_MASK(NUM_BITS, POS) \
 	((unsigned char) (((1 << (NUM_BITS)) - 1) << (POS)))
@@ -132,10 +129,6 @@
 
 #define QPNP_CHARGER_DEV_NAME	"qcom,qpnp-linear-charger"
 
-#ifdef CONFIG_MACH_OPPO
-struct qpnp_lbc_chip *the_chip = NULL;
-#endif
-
 /* usb_interrupts */
 
 struct qpnp_lbc_irq {
@@ -217,6 +210,9 @@ static enum power_supply_property msm_batt_power_props[] = {
 	POWER_SUPPLY_PROP_COOL_TEMP,
 	POWER_SUPPLY_PROP_WARM_TEMP,
 	POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL,
+/*lenovo-sw weiweij added for vbus voltage*/		
+	POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION,
+/*lenovo-sw weiweij added for vbus voltage end*/		
 };
 
 static char *pm_batt_supplied_to[] = {
@@ -637,6 +633,61 @@ static u8 qpnp_lbc_get_trim_val(struct qpnp_lbc_chip *chip)
 
 	return vddtrim_map[i].trim_val;
 }
+
+/*lenovo-sw weiweij add for s7 relative changes*/
+static struct qpnp_lbc_chip *tmp_chip=NULL;
+static int ovp_exist = 0;
+#define USB_PTH_STS_REG                                0x09
+#define USB_IN_OVP_MASK                      LBC_MASK(7, 6)	
+static int qpnp_lbc_is_usb_chg_ovp(struct qpnp_lbc_chip *chip)
+{
+	u8 usbin_valid_rt_sts;
+	int rc;
+
+	rc = qpnp_lbc_read(chip, chip->usb_chgpth_base + USB_PTH_STS_REG,
+				&usbin_valid_rt_sts, 1);
+	if (rc) {
+		pr_err("spmi read failed: addr=%03X, rc=%d\n",
+				chip->usb_chgpth_base + USB_PTH_STS_REG, rc);
+		return rc;
+	}
+
+	pr_info("rt_sts 0x%x\n", usbin_valid_rt_sts);
+	if(usbin_valid_rt_sts & 0x40)
+	    ovp_exist = 1;
+
+	rc = (usbin_valid_rt_sts & 0xc0);
+	return  (rc==0x40)? 1 : 0;
+}
+
+static int qpnp_lbc_is_usb_chg_connected(struct qpnp_lbc_chip *chip)
+{
+	u8 usbin_valid_rt_sts;
+	int rc;
+
+	rc = qpnp_lbc_read(chip, chip->usb_chgpth_base + USB_PTH_STS_REG,
+				&usbin_valid_rt_sts, 1);
+	if (rc) {
+		pr_err("spmi read failed: addr=%03X, rc=%d\n",
+				chip->usb_chgpth_base + USB_PTH_STS_REG, rc);
+		return rc;
+	}
+
+	pr_info("rt_sts 0x%x\n", usbin_valid_rt_sts);
+	if(usbin_valid_rt_sts & 0x40)
+	    ovp_exist = 1;
+
+	return (usbin_valid_rt_sts & USB_IN_OVP_MASK) ? 1 : 0;
+}
+
+int is_charger_plug_in(void)
+{
+	if(tmp_chip!=NULL)
+		return qpnp_lbc_is_usb_chg_connected(tmp_chip);
+	else 
+		return 0;
+}
+/*lenovo-sw weiweij add for s7 relative changes end*/
 
 static int qpnp_lbc_is_usb_chg_plugged_in(struct qpnp_lbc_chip *chip)
 {
@@ -1211,6 +1262,22 @@ out:
 	return rc;
 }
 
+/*lenovo-sw weiweij added for getting vbus voltage*/
+static int get_prop_vbus_voltage_now(struct qpnp_lbc_chip *chip)
+{
+	int rc = 0;
+	struct qpnp_vadc_result results;
+
+	rc = qpnp_vadc_read(chip->vadc_dev, USBIN, &results);
+	if (rc) {
+		pr_err("Unable to read usbin rc=%d\n", rc);
+		return 0;
+	}
+
+	return results.physical;
+}
+/*lenovo-sw weiweij added for getting vbus voltage end*/
+
 static int get_prop_battery_voltage_now(struct qpnp_lbc_chip *chip)
 {
 	int rc = 0;
@@ -1354,6 +1421,191 @@ static int get_prop_capacity(struct qpnp_lbc_chip *chip)
 	 */
 	return DEFAULT_CAPACITY;
 }
+
+/*lenovo-sw weiweij added for s7 relative changes*/
+#include <linux/delay.h>
+
+#define BOARD_WARM_TEMP_VOL 575000
+const static int ntc_buf_num = 25;
+typedef struct ntc_struct
+{
+	int temp;
+	int res;
+}ntc_struct;
+
+static ntc_struct ntc_buf[] = {
+	{ -20 , 1151 },
+    { -15 , 847 },
+    { -10 , 629 },
+    { -5 , 472 },
+    { 0 , 357 },
+    { 5 , 273 },
+    { 10 , 210 },
+    { 15 , 163 },
+    { 20 , 127 },
+    { 25 , 100 },
+    { 30 , 79 },
+    { 35 , 63 },
+    { 40 , 51 },
+    { 45 , 41 },
+    { 50 , 33 },
+    { 55 , 27 },
+    { 60 , 22 },
+    { 65 , 18 },
+    { 70 , 15 },
+    { 75 , 13 },
+    { 80 , 11 },
+    { 85, 9},
+    { 90, 7},   
+    { 95, 6},      
+    { 100, 5},       
+};
+static int res2temp(int res)
+{
+	int i;
+	int temp;
+	static int aceess_flag = 1;
+	
+	if(aceess_flag==0)
+	{
+		pr_err("get_ntc_temp already accessed, return\n");
+		return -1;
+	}
+
+	aceess_flag = 0;
+	
+	for(i=0;i<ntc_buf_num;i++)
+	{
+		if(ntc_buf[0].res<=res)
+		{
+			temp = -20;
+			break;
+		}
+
+		if(ntc_buf[ntc_buf_num-1].res>=res)
+		{
+			temp = 80;
+			break;
+		}
+		
+		if((ntc_buf[i].res<res)&&(ntc_buf[i-1].res>=res))
+		{
+			//pr_err("ww_debug ntc_buf[i].res %d, ntc_buf[i-1].res %d ntc_buf[i-1].temp %d, ntc_buf[i].temp %d \n", ntc_buf[i].res, ntc_buf[i-1].res, ntc_buf[i-1].temp, ntc_buf[i].temp);
+			temp = (ntc_buf[i-1].res - res)*5/(ntc_buf[i-1].res - ntc_buf[i].res) + ntc_buf[i-1].temp;
+			break;
+		}
+			
+	}
+
+
+	
+	aceess_flag = 1;
+	
+	return temp;
+}
+
+static int volt2res(int volt)
+{
+	int ret;
+
+	ret = volt*100/(1800000 - volt);
+	
+	return ret;
+}
+static int get_board_volt(void)
+{
+	int rc = 0;
+	struct qpnp_vadc_result results;
+
+	//tmp change
+	//return -1;
+	
+	if(tmp_chip == NULL)
+		return -1;
+	rc = qpnp_vadc_read(tmp_chip->vadc_dev, P_MUX2_1_1, &results);
+	if (rc) {
+		pr_err("Unable to read batt ID rc=%d\n", rc);
+		return -1;
+	}
+	return (int)results.physical;
+}
+
+int get_board_temp(void)
+{
+	int i;
+	const int cnt_num = 6;
+	int sum, avr;
+	int max_val, min_val;
+	int ret;
+	
+	sum = 0;
+	
+	//get
+	for(i=0;i<cnt_num;i++)
+	{
+		ret = get_board_volt();
+		if (ret<0) {
+			pr_err("Unable to read batt temperature rc=%d\n", ret);
+			return -1;
+		}
+
+		//pr_err(" ww_Debug cnt %d  vol = %d\n",  i,ret);
+
+		if(i==0)
+		{
+			max_val = ret;
+			min_val = ret;
+		}else
+		{
+			if(ret>max_val)
+				max_val = ret;
+			else if(ret<min_val)
+				min_val = ret;
+		}
+		
+		sum += ret;
+		
+		usleep(1000);
+	}
+
+	//sum
+	sum = sum - min_val - max_val;
+	avr = sum /(cnt_num-2);
+	
+	ret = volt2res(avr);
+	
+	return res2temp(ret)*10;
+}
+
+bool need_dec_chg_current(void)
+{
+	int board_temp = get_board_temp();
+	pr_info("board temp is %d\n", board_temp);
+
+	return false;
+/*lenovo-sw weiweij removed*/	
+/*	if(board_temp > 0 && board_temp < BOARD_WARM_TEMP_VOL)
+		return true;
+	else
+		return false;*/
+/*lenovo-sw weiweij removed end*/	
+}
+
+int get_batt_id_volt(void)
+{
+	int rc = 0;
+	struct qpnp_vadc_result results;
+	
+	if(tmp_chip == NULL)
+		return -1;
+	rc = qpnp_vadc_read(tmp_chip->vadc_dev, LR_MUX2_BAT_ID, &results);
+	if (rc) {
+		pr_err("Unable to read batt ID rc=%d\n", rc);
+		return -1;
+	}
+	return (int)results.physical;
+}
+/*lenovo-sw weiweij added for s7 relative changes end*/
 
 #define DEFAULT_TEMP		250
 static int get_prop_batt_temp(struct qpnp_lbc_chip *chip)
@@ -1732,6 +1984,11 @@ static int qpnp_batt_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL:
 		val->intval = chip->therm_lvl_sel;
 		break;
+/*lenovo-sw weiweij added for vbus voltage*/
+	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION:
+		val->intval = get_prop_vbus_voltage_now(chip);
+		break;
+/*lenovo-sw weiweij added for vbus voltage end*/
 	default:
 		return -EINVAL;
 	}
@@ -2463,26 +2720,19 @@ static irqreturn_t qpnp_lbc_chg_gone_irq_handler(int irq, void *_chip)
 	return IRQ_HANDLED;
 }
 
-#ifdef CONFIG_MACH_OPPO
-extern void opchg_usbin_valid_irq_handler(bool usb_present);
-#endif
 static irqreturn_t qpnp_lbc_usbin_valid_irq_handler(int irq, void *_chip)
 {
 	struct qpnp_lbc_chip *chip = _chip;
 	int usb_present;
-#ifndef CONFIG_MACH_OPPO
 	unsigned long flags;
-#endif
-
-#ifdef CONFIG_MACH_OPPO
-	if (is_project(OPPO_15109))
-		return IRQ_HANDLED;
-#endif
 
 	usb_present = qpnp_lbc_is_usb_chg_plugged_in(chip);
+	if(usb_present == 0)
+	{
+		usb_present = qpnp_lbc_is_usb_chg_ovp(chip);
+	}
 	pr_debug("usbin-valid triggered: %d\n", usb_present);
 
-#ifndef CONFIG_MACH_OPPO
 	if (chip->usb_present ^ usb_present) {
 		chip->usb_present = usb_present;
 		if (!usb_present) {
@@ -2526,12 +2776,24 @@ static irqreturn_t qpnp_lbc_usbin_valid_irq_handler(int irq, void *_chip)
 		pr_debug("Updating usb_psy PRESENT property\n");
 		power_supply_set_present(chip->usb_psy, chip->usb_present);
 	}
-#else
-	opchg_usbin_valid_irq_handler(usb_present);
-#endif
 
 	return IRQ_HANDLED;
 }
+
+/*lenovo-sw weiweij added for s7 relative changes*/
+//when ovp occur, pm8916 can't detect the charger unplugged event, so do double check in bq24192 driver
+void do_double_check_for_usb_unplug(void)
+{
+	if(tmp_chip != NULL)
+	{
+		if(ovp_exist == 1)
+		{
+			qpnp_lbc_usbin_valid_irq_handler(tmp_chip->irqs[USBIN_VALID].irq, tmp_chip);
+			ovp_exist = 0;
+		}
+	}
+}
+/*lenovo-sw weiweij added for s7 relative changes end*/
 
 static int qpnp_lbc_is_batt_temp_ok(struct qpnp_lbc_chip *chip)
 {
@@ -2832,17 +3094,6 @@ static int qpnp_lbc_request_irqs(struct qpnp_lbc_chip *chip)
 	return 0;
 }
 
-#ifdef CONFIG_MACH_OPPO
-static int qpnp_lbc_request_usbin_valid_irq(struct qpnp_lbc_chip *chip)
-{
-	int rc = 0;
-
-	SPMI_REQUEST_IRQ(chip, USBIN_VALID, rc, usbin_valid, 0,
-			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, 1);
-	return 0;
-}
-#endif
-
 static int qpnp_lbc_get_irqs(struct qpnp_lbc_chip *chip, u8 subtype,
 					struct spmi_resource *spmi_resource)
 {
@@ -2883,15 +3134,7 @@ static int qpnp_lbc_get_irqs(struct qpnp_lbc_chip *chip, u8 subtype,
 /* Get/Set initial state of charger */
 static void determine_initial_status(struct qpnp_lbc_chip *chip)
 {
-#ifdef CONFIG_MACH_OPPO
-	if (is_project(OPPO_15109))
-		return;
-#endif
-
 	chip->usb_present = qpnp_lbc_is_usb_chg_plugged_in(chip);
-	pr_debug("%s usb_present: %d\n", __func__, chip->usb_present);
-
-#ifndef CONFIG_MACH_OPPO
 	power_supply_set_present(chip->usb_psy, chip->usb_present);
 	/*
 	 * Set USB psy online to avoid userspace from shutting down if battery
@@ -2906,9 +3149,6 @@ static void determine_initial_status(struct qpnp_lbc_chip *chip)
 		}
 		power_supply_set_online(chip->usb_psy, 1);
 	}
-#else
-	opchg_usbin_valid_irq_handler(chip->usb_present);
-#endif
 }
 
 static void qpnp_lbc_collapsible_detection_work(struct work_struct *work)
@@ -2989,48 +3229,6 @@ static enum alarmtimer_restart vddtrim_callback(struct alarm *alarm,
 
 	return ALARMTIMER_NORESTART;
 }
-
-#ifdef CONFIG_MACH_OPPO
-#define BMS_VM_BMS_DATA_REG_0			0x40B0
-void opchg_set_pmic_soc_memory(int soc)
-{
-	int rc = 0;
-	u8 soc_temp = 0;
-
-	if (the_chip == NULL) {
-		pr_debug("%s the_chip is NULL\n", __func__);
-		return;
-	}
-	soc_temp = soc;
-	rc = qpnp_lbc_write(the_chip, BMS_VM_BMS_DATA_REG_0, &soc_temp, 1);
-	if (rc)
-		pr_err("%s fail,rc:%d\n",__func__,rc);
-}
-
-int opchg_get_pmic_soc_memory(void)
-{
-	int rc = 0;
-	u8 reg = 0;
-
-	if (the_chip == NULL) {
-		pr_debug("%s the_chip is NULL\n", __func__);
-		return reg;
-	}
-	rc = qpnp_lbc_read(the_chip, BMS_VM_BMS_DATA_REG_0, &reg, 1);
-	if (rc)
-		pr_err("%s fail,rc:%d\n",__func__,rc);
-
-	return reg;
-}
-
-int opchg_get_charger_inout(void)
-{
-	int charger_in = 0;
-
-	charger_in = qpnp_lbc_is_usb_chg_plugged_in(the_chip);
-	return charger_in;
-}
-#endif
 
 static int qpnp_lbc_parallel_charger_init(struct qpnp_lbc_chip *chip)
 {
@@ -3245,9 +3443,6 @@ static int qpnp_lbc_main_probe(struct spmi_device *spmi)
 	ktime_t kt;
 	struct qpnp_lbc_chip *chip;
 	struct power_supply *usb_psy;
-#ifdef CONFIG_MACH_OPPO
-	struct power_supply *batt_psy;
-#endif
 	int rc = 0;
 
 	usb_psy = power_supply_get_by_name("usb");
@@ -3255,14 +3450,6 @@ static int qpnp_lbc_main_probe(struct spmi_device *spmi)
 		pr_err("usb supply not found deferring probe\n");
 		return -EPROBE_DEFER;
 	}
-
-#ifdef CONFIG_MACH_OPPO
-	batt_psy = power_supply_get_by_name("battery");
-	if (!batt_psy) {
-		pr_err("battery supply not found deferring probe\n");
-		return -EPROBE_DEFER;
-	}
-#endif
 
 	chip = devm_kzalloc(&spmi->dev, sizeof(struct qpnp_lbc_chip),
 				GFP_KERNEL);
@@ -3286,9 +3473,6 @@ static int qpnp_lbc_main_probe(struct spmi_device *spmi)
 	alarm_init(&chip->vddtrim_alarm, ALARM_REALTIME, vddtrim_callback);
 	INIT_DELAYED_WORK(&chip->collapsible_detection_work,
 			qpnp_lbc_collapsible_detection_work);
-#ifdef CONFIG_MACH_OPPO
-	the_chip = chip;
-#endif
 
 	/* Get all device-tree properties */
 	rc = qpnp_charger_read_dt_props(chip);
@@ -3319,22 +3503,6 @@ static int qpnp_lbc_main_probe(struct spmi_device *spmi)
 					rc);
 		goto fail_chg_enable;
 	}
-
-#ifdef CONFIG_MACH_OPPO
-	rc = qpnp_lbc_request_usbin_valid_irq(chip);
-	if (rc) {
-		pr_err("unable to initialize LBC MISC rc=%d\n", rc);
-		goto fail_chg_enable;
-	}
-	determine_initial_status(chip);
-	rc = qpnp_disable_lbc_charger(chip);
-	if (rc)
-		pr_err("Unable to disable charger rc=%d\n", rc);
-
-	pr_info("%s success\n",__func__);
-
-	return 0;
-#endif
 
 	/* Initialize h/w */
 	rc = qpnp_lbc_misc_init(chip);
@@ -3368,11 +3536,9 @@ static int qpnp_lbc_main_probe(struct spmi_device *spmi)
 
 	if (chip->bat_if_base) {
 		chip->batt_present = qpnp_lbc_is_batt_present(chip);
-#ifndef CONFIG_MACH_OPPO
-		chip->batt_psy.name = "battery";
-#else
-		chip->batt_psy.name = "battery-invalid";
-#endif
+/*lenovo-sw weiweij modified for s7 relative changes*/		
+		chip->batt_psy.name = "battery_qpnp";
+/*lenovo-sw weiweij modified for s7 relative changes end*/		
 		chip->batt_psy.type = POWER_SUPPLY_TYPE_BATTERY;
 		chip->batt_psy.properties = msm_batt_power_props;
 		chip->batt_psy.num_properties =
@@ -3460,6 +3626,10 @@ static int qpnp_lbc_main_probe(struct spmi_device *spmi)
 			get_prop_batt_present(chip),
 			get_prop_battery_voltage_now(chip),
 			get_prop_capacity(chip));
+
+/*lenovo-sw weiweij added for s7 relative changes*/
+	tmp_chip = chip;
+/*lenovo-sw weiweij added for s7 relative changes end*/
 
 	return 0;
 

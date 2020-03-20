@@ -1,7 +1,3 @@
-#ifdef CONFIG_OPPO_CAMERA_51
-#include <media/msm_cam_sensor_oppo_51.h>
-#else
-
 #ifndef __LINUX_MSM_CAM_SENSOR_H
 #define __LINUX_MSM_CAM_SENSOR_H
 
@@ -219,12 +215,40 @@ struct camera_vreg_t {
 	enum camera_vreg_type type;
 };
 
+/*xuhx1 for tof begin*/
+struct tof_read_t {
+	void *dbuffer;
+	uint32_t num_bytes;
+};
+
+struct  tof_read_custom_t{
+  uint32_t frame_id;
+  int32_t  valid_data;
+  int32_t  range_mm;  /*!< range distance in mm. */
+  int32_t  signalRate_mcps; /*!< signal rate (MCPS)\n these is a 9.7 fix point value, which is effectively a measure of target reflectance.*/
+  uint32_t errorStatus;      /*!< Error status of the current measurement. \n
+                                see @a ::RangeError_u @a VL6180x_GetRangeStatusErrString() */
+  uint32_t DMaxSq;              /*!< DMax²  when applicable */
+  uint16_t filtered_range_mm;      /*!< Filtered ranging value */
+  uint16_t filtered_rawRange_mm;   /*!< raw range value (scaled) */
+  uint32_t filtered_rtnRate;       /*!< Return signal rate  related to \a RESULT_RANGE_RETURN_SIGNAL_COUNT */
+  uint32_t filtered_refRate;       /*!< Reference signal signal rate related to \a RESULT_RANGE_REFERENCE_SIGNAL_COUNT */
+  uint32_t filtered_rtnAmbRate;    /*!< Return Ambient rate related to \a RESULT_RANGE_RETURN_AMB_COUNT */
+  uint32_t filtered_refAmbRate;    /*!< Reference Ambient rate related to \a RESULT_RANGE_REFERENCE_SIGNAL_COUNT */
+  uint32_t filtered_rtnConvTime;   /*!< Return Convergence time \a RESULT_RANGE_RETURN_CONV_TIME */
+  uint32_t filtered_refConvTime;   /*!< Reference convergence time \a RESULT_RANGE_REFERENCE_CONV_TIME */
+} ;
+/*xuhx1 for tof end*/
+
 struct sensorb_cfg_data {
 	int cfgtype;
 	union {
 		struct msm_sensor_info_t      sensor_info;
 		struct msm_sensor_init_params sensor_init_params;
 		void                         *setting;
+/*xuhx1 for tof begin*/
+		struct tof_read_t             read_tof_data;
+/*xuhx1 for tof end*/
 	} cfg;
 };
 
@@ -254,6 +278,13 @@ enum eeprom_cfg_type_t {
 
 struct eeprom_get_t {
 	uint32_t num_bytes;
+/*+begin xujt1 add eeprom checksum function 2014-07-11*/
+    uint8_t is_3a_checksumed;
+/*+end*/
+/*+add ljk for otp checksum*/
+    uint8_t is_ois_checksumed;
+    uint8_t is_posture_checksumed;
+/*+end*/
 };
 
 struct eeprom_read_t {
@@ -276,7 +307,7 @@ struct msm_eeprom_cfg_data {
 	enum eeprom_cfg_type_t cfgtype;
 	uint8_t is_supported;
 	union {
-		char eeprom_name[MAX_EEPROM_NAME];
+		char eeprom_name[MAX_SENSOR_NAME];
 		struct eeprom_get_t get_data;
 		struct eeprom_read_t read_data;
 		struct eeprom_write_t write_data;
@@ -363,7 +394,7 @@ struct msm_eeprom_cfg_data32 {
 	enum eeprom_cfg_type_t cfgtype;
 	uint8_t is_supported;
 	union {
-		char eeprom_name[MAX_EEPROM_NAME];
+		char eeprom_name[MAX_SENSOR_NAME];
 		struct eeprom_get_t get_data;
 		struct eeprom_read_t32 read_data;
 		struct eeprom_write_t32 write_data;
@@ -405,6 +436,16 @@ enum msm_sensor_cfg_type_t {
 	CFG_SET_AUTOFOCUS,
 	CFG_CANCEL_AUTOFOCUS,
 	CFG_SET_STREAM_TYPE,
+/*+Begin: add for camera burst i2c by ljk*/
+    CFG_WRITE_I2C_ARRAY_L,//add for byte or word i2c operation
+/*+End.*/
+/*+Begin: xuhx1 for tof begin*/
+	CFG_GET_LASER_REG,
+/*+End.*/
+/*+Begin: chenglong1 add for insensor otp 2015-4-14*/
+	CFG_READ_I2C_SEQ_ARRAY,
+	CFG_APPLY_INSENSOR_OTP,
+/*+End.*/
 };
 
 enum msm_actuator_cfg_type_t {
@@ -416,6 +457,16 @@ enum msm_actuator_cfg_type_t {
 	CFG_ACTUATOR_POWERDOWN,
 	CFG_ACTUATOR_POWERUP,
 	CFG_ACTUATOR_INIT,
+/*+Begin: ljk for set oismode.*/
+	CFG_SET_OISMODE,
+/*+End.*/
+/*+Begin: ljk  add command to enable/disable OIS.*/
+    CFG_SET_OIS_ENABLE,
+/*+End.*/
+/* +Begin xujt1 add command to init laser*/
+        CFG_LASER_INIT,
+        CFG_LASER_CALIB,
+/* +End xujt1  add command to init laser*/
 };
 
 enum msm_ois_cfg_type_t {
@@ -536,6 +587,20 @@ struct msm_actuator_set_position_t {
 	uint16_t delay[MAX_NUMBER_OF_STEPS];
 };
 
+/*+ begin ljk add command to laser data*/
+struct msm_camera_laser_data {
+	uint8_t position;
+	uint8_t signal;
+	uint8_t noise;
+	uint8_t compensation_rate;
+};
+
+struct msm_laser_calib_data {
+	int offset;
+	int crosstalk;
+};
+/*+ end ljk add command to laser data*/
+
 struct msm_actuator_cfg_data {
 	int cfgtype;
 	uint8_t is_af_supported;
@@ -545,6 +610,15 @@ struct msm_actuator_cfg_data {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+/* + add ljk for otp checksum*/
+		int cammode;
+/* + end ljk for otp checksum*/
+/* +begin ljk add command to enable/disable OIS*/
+		uint8_t ois_enable;
+/* +end	ljk add command to enable/disable OIS*/
+/*+ begin ljk add command to laser data*/
+		struct msm_laser_calib_data laser_calib;
+/*+ end ljk add command to laser data*/
 	} cfg;
 };
 
@@ -554,6 +628,11 @@ enum msm_camera_led_config_t {
 	MSM_CAMERA_LED_HIGH,
 	MSM_CAMERA_LED_INIT,
 	MSM_CAMERA_LED_RELEASE,
+	/*+Begin: chenglong1 add for flash level set*/
+	MSM_CAMERA_LED_SET_LEVEL_LOW,
+	MSM_CAMERA_LED_SET_LEVEL_HIGH,
+	MSM_CAMERA_LED_SET_DURATION,
+	/*+End.*/
 };
 
 struct msm_camera_led_cfg_t {
@@ -561,6 +640,10 @@ struct msm_camera_led_cfg_t {
 	uint32_t torch_current[MAX_LED_TRIGGERS];
 	uint32_t flash_current[MAX_LED_TRIGGERS];
 	uint32_t flash_duration[MAX_LED_TRIGGERS];
+	/*+Begin: chenglong1 add for flash level set*/
+	uint32_t torch_level[MAX_LED_TRIGGERS];
+	uint32_t flash_level[MAX_LED_TRIGGERS];
+	/*+End.*/
 };
 
 struct msm_flash_init_info_t {
@@ -696,6 +779,15 @@ struct msm_actuator_cfg_data32 {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+/* + add ljk for otp checksum*/
+		int cammode;
+/* + end ljk for otp checksum*/
+/* +begin ljk add command to enable/disable OIS*/
+		uint8_t ois_enable;
+/* +end	ljk add command to enable/disable OIS*/
+/*+ begin ljk add command to laser data*/
+		struct msm_laser_calib_data laser_calib;
+/*+ end ljk add command to laser data*/
 	} cfg;
 };
 
@@ -707,12 +799,22 @@ struct csiphy_cfg_data32 {
 	} cfg;
 };
 
+/*xuhx1 for tof begin*/
+struct tof_read_t32 {
+	compat_uptr_t dbuffer;
+	uint32_t num_bytes;
+};
+/*xuhx1 for tof end*/
+
 struct sensorb_cfg_data32 {
 	int cfgtype;
 	union {
 		struct msm_sensor_info_t      sensor_info;
 		struct msm_sensor_init_params sensor_init_params;
 		compat_uptr_t                 setting;
+/*xuhx1 for tof begin*/
+		struct tof_read_t32           read_tof_data;
+/*xuhx1 for tof end*/
 	} cfg;
 };
 
@@ -781,5 +883,3 @@ struct msm_flash_cfg_data_t32 {
 #endif
 
 #endif /* __LINUX_MSM_CAM_SENSOR_H */
-
-#endif
