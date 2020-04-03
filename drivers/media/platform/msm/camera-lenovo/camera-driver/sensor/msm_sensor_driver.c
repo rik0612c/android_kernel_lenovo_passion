@@ -800,7 +800,7 @@ int32_t msm_sensor_driver_probe(void *setting,
 
 	/* Fill CCI master, slave address and CCI default params */
 	if (!s_ctrl->sensor_i2c_client) {
-		pr_err("failed: sensor_i2c_client %p",
+		pr_err("failed: sensor_i2c_client %pK",
 			s_ctrl->sensor_i2c_client);
 		rc = -EINVAL;
 		goto free_camera_info;
@@ -813,7 +813,7 @@ int32_t msm_sensor_driver_probe(void *setting,
 
 	cci_client = s_ctrl->sensor_i2c_client->cci_client;
 	if (!cci_client) {
-		pr_err("failed: cci_client %p", cci_client);
+		pr_err("failed: cci_client %pK", cci_client);
 		goto free_camera_info;
 	}
 	cci_client->cci_i2c_master = s_ctrl->cci_i2c_master;
@@ -1147,7 +1147,7 @@ static int32_t msm_sensor_driver_parse(struct msm_sensor_ctrl_t *s_ctrl)
 	s_ctrl->sensor_i2c_client = kzalloc(sizeof(*s_ctrl->sensor_i2c_client),
 		GFP_KERNEL);
 	if (!s_ctrl->sensor_i2c_client) {
-		pr_err("failed: no memory sensor_i2c_client %p",
+		pr_err("failed: no memory sensor_i2c_client %pK",
 			s_ctrl->sensor_i2c_client);
 		return -ENOMEM;
 	}
@@ -1156,7 +1156,7 @@ static int32_t msm_sensor_driver_parse(struct msm_sensor_ctrl_t *s_ctrl)
 	s_ctrl->msm_sensor_mutex = kzalloc(sizeof(*s_ctrl->msm_sensor_mutex),
 		GFP_KERNEL);
 	if (!s_ctrl->msm_sensor_mutex) {
-		pr_err("failed: no memory msm_sensor_mutex %p",
+		pr_err("failed: no memory msm_sensor_mutex %pK",
 			s_ctrl->msm_sensor_mutex);
 		goto FREE_SENSOR_I2C_CLIENT;
 	}
@@ -1185,7 +1185,7 @@ static int32_t msm_sensor_driver_parse(struct msm_sensor_ctrl_t *s_ctrl)
 
 	/* Store sensor control structure in static database */
 	g_sctrl[s_ctrl->id] = s_ctrl;
-	pr_err("g_sctrl[%d] %p", s_ctrl->id, g_sctrl[s_ctrl->id]);
+	pr_err("g_sctrl[%d] %pK", s_ctrl->id, g_sctrl[s_ctrl->id]);
 
 	return rc;
 

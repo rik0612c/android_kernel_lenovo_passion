@@ -882,7 +882,7 @@ unsigned long apply_slack(struct timer_list *timer, unsigned long expires)
 	if (mask == 0)
 		return expires;
 
-	bit = __fls(mask);
+	bit = find_last_bit(&mask, BITS_PER_LONG);
 
 	mask = (1UL << bit) - 1;
 
@@ -1002,7 +1002,7 @@ void add_timer_on(struct timer_list *timer, int cpu)
 		spin_unlock(&base->lock);
 		base = new_base;
 		spin_lock(&base->lock);
-	timer_set_base(timer, base);
+		timer_set_base(timer, base);
 	}
 	debug_activate(timer, timer->expires);
 	internal_add_timer(base, timer);
@@ -1228,7 +1228,7 @@ static inline void __run_timers(struct tvec_base *base)
 					!cascade(base, &base->tv4, INDEX(2)))
 			cascade(base, &base->tv5, INDEX(3));
 		++base->timer_jiffies;
-		list_replace_init(base->tv1.vec + index, head);
+		list_replace_init(base->tv1.vec + index, &work_list);
 		while (!list_empty(head)) {
 			void (*fn)(unsigned long);
 			unsigned long data;

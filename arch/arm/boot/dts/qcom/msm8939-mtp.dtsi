@@ -160,8 +160,8 @@
 	};
 
 	i2c@78ba000 { /* BLSP1 QUP6 */
-		//lenovo-sw lumy1 remove for bcm nfc
-		/*nfc-nci@e {
+		//lenovo-sw lumy1 remove for bcm nfc (was returned Delta-77)
+		nfc-nci@e {
 			compatible = "qcom,nfc-nci";
 			reg = <0x0e>;
 			qcom,irq-gpio = <&msm_gpio 21 0x00>;
@@ -176,7 +176,7 @@
 			qcom,clk-gpio = <&pm8916_gpios 2 0>;
 			clocks = <&clock_rpm clk_bb_clk2_pin>;
 			clock-names = "ref_clk";
-		};*/
+		};
 
 	/* lenovo-sw zhangrc2 add for smartpa begin */
     nxp_tfa9887@34 {

@@ -411,6 +411,8 @@ struct msm_vfe_axi_src_state {
 
 enum msm_isp_event_idx {
 	ISP_REG_UPDATE      = 0,
+
+
 	ISP_START_ACK       = 1,
 	ISP_STOP_ACK        = 2,
 	ISP_IRQ_VIOLATION   = 3,
@@ -429,6 +431,8 @@ enum msm_isp_event_idx {
 #define ISP_SOF_EVENT_BASE        (ISP_EVENT_BASE + (3 << ISP_EVENT_OFFSET))
 #define ISP_EOF_EVENT_BASE        (ISP_EVENT_BASE + (4 << ISP_EVENT_OFFSET))
 #define ISP_EVENT_REG_UPDATE      (ISP_EVENT_BASE + ISP_REG_UPDATE)
+#define ISP_EVENT_EPOCH_0         (ISP_EVENT_BASE + ISP_EPOCH_0)
+#define ISP_EVENT_EPOCH_1         (ISP_EVENT_BASE + ISP_EPOCH_1)
 #define ISP_EVENT_START_ACK       (ISP_EVENT_BASE + ISP_START_ACK)
 #define ISP_EVENT_STOP_ACK        (ISP_EVENT_BASE + ISP_STOP_ACK)
 #define ISP_EVENT_IRQ_VIOLATION   (ISP_EVENT_BASE + ISP_IRQ_VIOLATION)
@@ -442,6 +446,7 @@ enum msm_isp_event_idx {
 #define ISP_EVENT_STATS_NOTIFY    (ISP_STATS_EVENT_BASE)
 #define ISP_EVENT_COMP_STATS_NOTIFY (ISP_EVENT_STATS_NOTIFY + MSM_ISP_STATS_MAX)
 #define ISP_EVENT_FE_READ_DONE    (ISP_EVENT_BASE + ISP_FE_RD_DONE)
+#define ISP_EVENT_STREAM_UPDATE_DONE   (ISP_STREAM_EVENT_BASE)
 
 /* The msm_v4l2_event_data structure should match the
  * v4l2_event.u.data field.
@@ -564,6 +569,9 @@ struct msm_isp_event_data32 {
 #define VIDIOC_MSM_ISP_RELEASE_STATS_STREAM \
 	_IOWR('V', BASE_VIDIOC_PRIVATE+11, \
 	struct msm_vfe_stats_stream_release_cmd)
+
+#define VIDIOC_MSM_ISP_REG_UPDATE_CMD \
+	_IOWR('V', BASE_VIDIOC_PRIVATE+12, enum msm_vfe_input_src)
 
 #define VIDIOC_MSM_ISP_UPDATE_STREAM \
 	_IOWR('V', BASE_VIDIOC_PRIVATE+13, struct msm_vfe_axi_stream_update_cmd)

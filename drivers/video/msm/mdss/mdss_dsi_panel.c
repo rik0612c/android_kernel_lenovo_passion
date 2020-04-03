@@ -21,7 +21,7 @@
 #include <linux/leds.h>
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
-#include <linux/display_state.h>
+
 
 #include "mdss_dsi.h"
 #include "mdss_livedisplay.h"
@@ -36,13 +36,6 @@
 
 #define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
-
-bool display_on = true;
-
-bool is_display_on()
-{
-	return display_on;
-}
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
@@ -672,8 +665,6 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		return -EINVAL;
 	}
 
-	display_on = true;
-
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
@@ -751,8 +742,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-
-	display_on = false;
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -1338,8 +1327,8 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		struct mdss_panel_info *pinfo)
 {
 	int rc = 0;
-/*delta
-	u32 tmp = 0; */
+//*delta
+	u32 tmp = 0;
 	rc = of_property_read_u32(pan_node,
 			"qcom,mdss-dsi-min-refresh-rate",
 			&pinfo->min_fps);
@@ -1353,7 +1342,7 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		 */
 		pinfo->min_fps = MIN_REFRESH_RATE;
 		rc = 0;
-	} 
+	}
 
 	rc = of_property_read_u32(pan_node,
 			"qcom,mdss-dsi-max-refresh-rate",
@@ -1371,7 +1360,7 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		rc = 0;
 	}
 
-/*delta
+//*delta
 	rc = of_property_read_u32(pan_node,
 			"qcom,mdss-dsi-idle-refresh-rate",
 			&tmp);
@@ -1379,7 +1368,7 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		pinfo->idle_fps = tmp;
 	}
 
-*/
+//*delta
 	pr_info("dyn_fps: min = %d, max = %d\n",
 			pinfo->min_fps, pinfo->max_fps);
 	return rc;
@@ -1924,6 +1913,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		}
 		/*end:lenovo.sw2 houdz1 add for p1 esd check*/
 	}
+
 	pinfo->mipi.force_clk_lane_hs = of_property_read_bool(np,
 		"qcom,mdss-dsi-force-clock-lane-hs");
 
@@ -1939,8 +1929,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	mdss_dsi_parse_panel_horizintal_line_idle(np, ctrl_pdata);
 
 	mdss_dsi_parse_dfps_config(np, ctrl_pdata);
-        
-        mdss_livedisplay_parse_dt(np, pinfo);
+ 	mdss_livedisplay_parse_dt(np, pinfo);
 
 	/*lenovo.sw2 houdz1 add for lcd effect(start)*/
 	#ifdef CONFIG_FB_LENOVO_LCD_EFFECT

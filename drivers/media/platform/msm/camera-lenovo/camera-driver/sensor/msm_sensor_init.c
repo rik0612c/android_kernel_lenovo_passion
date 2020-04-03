@@ -120,7 +120,7 @@ static long msm_sensor_init_subdev_ioctl(struct v4l2_subdev *sd,
 
 	/* Validate input parameters */
 	if (!s_init) {
-		pr_err("failed: s_init %p", s_init);
+		pr_err("failed: s_init %pK", s_init);
 		return -EINVAL;
 	}
 

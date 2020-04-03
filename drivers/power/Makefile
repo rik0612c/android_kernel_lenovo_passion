@@ -74,5 +74,6 @@ obj-$(CONFIG_BATTERY_BCL)	+= battery_current_limit.o
 obj-$(CONFIG_MSM_BCL_CTL)	+= msm_bcl.o
 obj-$(CONFIG_MSM_BCL_PERIPHERAL_CTL) += bcl_peripheral.o
 obj-$(CONFIG_POWER_RESET)	+= reset/
+obj-$(CONFIG_OPPO_CHARGER)	+= oppo/
 obj-y				+= qcom/
 obj-y				+= lenovo/

@@ -1223,8 +1223,8 @@
 				output-low;
 
 			};
-
 		};
+
 		/* add pingrp for touchscreen */
 		pmx_ts_int_active {
 			qcom,pins = <&gp 13>;

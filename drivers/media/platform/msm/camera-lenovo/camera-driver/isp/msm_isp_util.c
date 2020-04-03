@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,6 +21,7 @@
 #include "msm_camera_io_util.h"
 
 #define MAX_ISP_V4l2_EVENTS 100
+#define MAX_ISP_REG_LIST 100
 static DEFINE_MUTEX(bandwidth_mgr_mutex);
 static struct msm_isp_bandwidth_mgr isp_bandwidth_mgr;
 
@@ -535,6 +536,7 @@ int msm_isp_cfg_input(struct vfe_device *vfe_dev, void *arg)
 static int msm_isp_proc_cmd_list_unlocked(struct vfe_device *vfe_dev, void *arg)
 {
 	int rc = 0;
+	uint32_t count = 0;
 	struct msm_vfe_cfg_cmd_list *proc_cmd =
 		(struct msm_vfe_cfg_cmd_list *)arg;
 	struct msm_vfe_cfg_cmd_list cmd, cmd_next;
@@ -556,6 +558,12 @@ static int msm_isp_proc_cmd_list_unlocked(struct vfe_device *vfe_dev, void *arg)
 			pr_err("%s:%d failed: next size %u != expected %zu\n",
 				__func__, __LINE__, cmd.next_size,
 				sizeof(struct msm_vfe_cfg_cmd_list));
+			break;
+		}
+		if (++count >= MAX_ISP_REG_LIST) {
+			pr_err("%s:%d Error exceeding the max register count:%u\n",
+				__func__, __LINE__, count);
+			rc = -EINVAL;
 			break;
 		}
 		if (copy_from_user(&cmd_next, (void __user *)cmd.next,
@@ -604,6 +612,7 @@ static void msm_isp_compat_to_proc_cmd(struct msm_vfe_cfg_cmd2 *proc_cmd,
 static int msm_isp_proc_cmd_list_compat(struct vfe_device *vfe_dev, void *arg)
 {
 	int rc = 0;
+	uint32_t count = 0;
 	struct msm_vfe_cfg_cmd_list_32 *proc_cmd =
 		(struct msm_vfe_cfg_cmd_list_32 *)arg;
 	struct msm_vfe_cfg_cmd_list_32 cmd, cmd_next;
@@ -626,6 +635,12 @@ static int msm_isp_proc_cmd_list_compat(struct vfe_device *vfe_dev, void *arg)
 			pr_err("%s:%d failed: next size %u != expected %zu\n",
 				__func__, __LINE__, cmd.next_size,
 				sizeof(struct msm_vfe_cfg_cmd_list));
+			break;
+		}
+		if (++count >= MAX_ISP_REG_LIST) {
+			pr_err("%s:%d Error exceeding the max register count:%u\n",
+				__func__, __LINE__, count);
+			rc = -EINVAL;
 			break;
 		}
 		if (copy_from_user(&cmd_next, compat_ptr(cmd.next),
@@ -778,13 +793,13 @@ static long msm_isp_ioctl_unlocked(struct v4l2_subdev *sd,
 		rc = msm_isp_smmu_attach(vfe_dev->buf_mgr, arg);
 		mutex_unlock(&vfe_dev->core_mutex);
 		break;
+	case MSM_SD_NOTIFY_FREEZE:
+		vfe_dev->isp_sof_debug = 0;
+		break;
 	case VIDIOC_MSM_ISP_BUF_DONE:
 		mutex_lock(&vfe_dev->core_mutex);
 		rc = msm_isp_user_buf_done(vfe_dev, arg);
 		mutex_unlock(&vfe_dev->core_mutex);
-		break;
-	case MSM_SD_NOTIFY_FREEZE:
-		vfe_dev->isp_sof_debug = 0;
 		break;
 	case MSM_SD_SHUTDOWN:
 		while (vfe_dev->vfe_open_cnt != 0)
@@ -1593,6 +1608,7 @@ static void msm_isp_process_overflow_irq(
 		*irq_status0 = 0;
 		*irq_status1 = 0;
 
+		memset(&error_event, 0, sizeof(error_event));
 		error_event.frame_id =
 			vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id;
 		error_event.u.error_info.error_mask = 1 << ISP_WM_BUS_OVERFLOW;
@@ -1827,6 +1843,11 @@ int msm_isp_open_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	vfe_dev->axi_data.hw_info = vfe_dev->hw_info->axi_hw_info;
 	vfe_dev->taskletq_idx = 0;
 	vfe_dev->vt_enable = 0;
+	vfe_dev->bus_util_factor = 0;
+	rc = of_property_read_u32(vfe_dev->pdev->dev.of_node,
+			"bus-util-factor", &vfe_dev->bus_util_factor);
+	if (rc < 0)
+		ISP_DBG("%s: Use default bus utilization factor\n", __func__);
 	iommu_set_fault_handler(vfe_dev->buf_mgr->iommu_domain,
 		msm_vfe_iommu_fault_handler, vfe_dev);
 	mutex_unlock(&vfe_dev->core_mutex);
